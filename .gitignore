@@ -6,5 +6,6 @@ game-data-summary/summary_cache.dat
 open-api-access.doc
 .gocache
 .codex_pydeps
+.agents
 NewAdminclient/node_modules/
 NewAdminclient/dist/
