@@ -394,10 +394,6 @@ func (gcm *GameCacheMgr) CheckPoolWithChange(agentId int64, symbol, recordId, cu
 
 	game := agent.GetGame(symbol)
 	//水池计算方式  pool = 总亏损-总税收
-	pool := (game.TotalEffectBet.Add(bet).Sub(game.TotalProfLoss.Add(award))).Sub(game.TotalRevenue.Add(revenue))
-	if pool.LessThanOrEqual(decimal.Zero) {
-		return false
-	}
 	user := agent.GetUser(uint32(userId))
 	if user.IsTourist == 0 {
 		before := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
@@ -429,10 +425,6 @@ func (gcm *GameCacheMgr) CheckPoolWithOutBet(agentId int64, symbol, recordId, cu
 
 	game := agent.GetGame(symbol)
 	//水池计算方式  pool = 总亏损-总税收
-	pool := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-	if pool.LessThan(award) {
-		return false
-	}
 	user := agent.GetUser(uint32(userId))
 	if user.IsTourist == 0 {
 		before := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
@@ -554,9 +546,6 @@ func (gcm *GameCacheMgr) Lottery(agentId int64, userId int32, pc *config.Pool, s
 	//判断pool等级
 	t, r := gcm.poolType(pool, pc)
 	//计算可赔付值
-	if t == config.POOL_BREAK_DOWN {
-		return pool, false
-	}
 	//判断是否自动ctrl
 	if ac := config.CfgIns.GetAutoCtrl(user.TotalEffectBet, user.TotalProfLoss); ac != nil {
 		zap.L().Debug("Lottery:自动控制", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("ac", ac))

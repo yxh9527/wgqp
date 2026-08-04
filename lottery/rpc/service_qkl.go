@@ -327,7 +327,7 @@ func (d *LotteryService) QKLDoBetContinue(_ context.Context, req *services.QKLDo
 		} else {
 			//判断是否可以开奖
 			//判断pool是否足够 足够立马扣除 不继续下注 只检查
-			if dao.CacheIns().CheckPoolWithOutBet(int64(req.AgentId), eGame.ConfName, req.RoundID, req.CurrencyType, deltaWin.Mul(exchange), decimal.Zero, decimal.Zero, req.UserId) {
+			if dao.CacheIns().ChangePool(int64(req.AgentId), int32(req.UserId), eGame.ConfName, req.CurrencyType, req.RoundID, decimal.Zero, deltaWin.Mul(exchange), pc.Pool[1].Revenue); true {
 				//不够赔 不可以开
 				resp.CanAfford = true
 			}
@@ -550,12 +550,7 @@ func (d *LotteryService) QKLDoBetSettleWithCheck(_ context.Context, req *service
 	}
 	if req.Hit == "win" {
 		if w2.GreaterThan(decimal.Zero) {
-			//判断是否可以开奖
-			if !dao.CacheIns().CheckPoolWithChange(int64(req.AgentId), eGame.ConfName, req.RoundID, req.CurrencyType, w2.Mul(exchange), decimal.Zero, decimal.Zero, req.UserId) {
-				//不够赔 不可以开
-				resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
-				return resp, nil
-			}
+			dao.CacheIns().ChangePool(int64(req.AgentId), int32(req.UserId), eGame.ConfName, req.CurrencyType, req.RoundID, decimal.Zero, w2.Mul(exchange), pc.Pool[1].Revenue)
 			tmp, err := d.updatePlayerCurrency(req.UserId, w2.Mul(decimal.NewFromInt(100)).IntPart())
 			if err != services.ErrorCode_OK {
 				d.rollbackPoolChange(req.AgentId, req.UserId, eGame.ConfName, req.CurrencyType, req.RoundID, decimal.Zero, w2.Mul(exchange), pc.Pool[1].Revenue)
@@ -806,9 +801,8 @@ func (d *LotteryService) QKLDoBet(_ context.Context, req *services.QKLDoBetReq) 
 	newCurrency := decimal.Zero
 
 	if win.GreaterThan(decimal.Zero) {
-		revenue := bet.Mul(exchange).Mul(pc.Pool[1].Revenue).Truncate(4)
 		//判断pool是否足够 足够立马扣除
-		if !dao.CacheIns().CheckPoolWithChange(int64(req.AgentId), eGame.ConfName, req.RoundID, req.CurrencyType, win.Mul(exchange), bet.Mul(exchange), revenue, req.UserId) {
+		if dao.CacheIns().ChangePool(int64(req.AgentId), int32(req.UserId), eGame.ConfName, req.CurrencyType, req.RoundID, bet.Mul(exchange), win.Mul(exchange), pc.Pool[1].Revenue); false {
 			//不够赔 不可以开
 			resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
 			return resp, nil
@@ -1097,12 +1091,7 @@ func (d *LotteryService) QKLDoMultiplayerCashout(_ context.Context, req *service
 			zap.Any("gameId", req.GameId))
 		return resp, nil
 	}
-	//判断是否可以开奖
-	if !dao.CacheIns().CheckPoolWithChange(int64(req.AgentId), eGame.ConfName, req.RoundID, req.CurrencyType, win.Mul(exchange), decimal.Zero, decimal.Zero, req.UserId) {
-		//不够赔 不可以开
-		resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
-		return resp, nil
-	}
+	dao.CacheIns().ChangePool(int64(req.AgentId), int32(req.UserId), eGame.ConfName, req.CurrencyType, req.RoundID, decimal.Zero, win.Mul(exchange), pc.Pool[1].Revenue)
 	tmp, code := d.updatePlayerCurrency(req.UserId, win.Mul(decimal.NewFromInt(100)).IntPart())
 	if code != services.ErrorCode_OK {
 		d.rollbackPoolChange(req.AgentId, req.UserId, eGame.ConfName, req.CurrencyType, req.RoundID, decimal.Zero, win.Mul(exchange), pc.Pool[1].Revenue)
@@ -1223,9 +1212,7 @@ func (d *LotteryService) QKLSettleMultiplayer(_ context.Context, req *services.Q
 	}
 	newCurrencys := make(map[uint32]*services.QKLNewCurrencyItem)
 	deltas := make(map[uint32]int64)
-	totalWin, _ := decimal.NewFromString(req.TotalWin)
-	exchange, ok := config.CfgIns.GetExchange(req.Records[0].CurrencyType)
-	if !ok {
+	if _, ok := config.CfgIns.GetExchange(req.Records[0].CurrencyType); !ok {
 		resp.Code = services.ErrorCode_SYSTEM_ERROR
 		zap.L().Error("QKLSettleMultiplayer:获取汇率配置失败",
 			zap.Any("currencyType", req.Records[0].CurrencyType),
@@ -1234,8 +1221,7 @@ func (d *LotteryService) QKLSettleMultiplayer(_ context.Context, req *services.Q
 			zap.Any("gameId", req.Records[0].GameId))
 		return resp, nil
 	}
-	totalWin = totalWin.Mul(exchange)
-	agentId, gameId := int(req.Records[0].AgentId), int(req.Records[0].GameId)
+	gameId := int(req.Records[0].GameId)
 	//首先判断水池是否足够赔付
 	for _, item := range req.Records {
 		user := dao.CacheIns().GetUser(int64(item.AgentId), int64(item.UserId))
@@ -1257,12 +1243,6 @@ func (d *LotteryService) QKLSettleMultiplayer(_ context.Context, req *services.Q
 
 	zap.L().Debug("QKLSettleMultiplayer:批量结算", zap.Any("symbol", game.ConfName), zap.Any("record count", len(req.Records)), zap.Any("req", req))
 
-	pool := dao.CacheIns().GetPool(int64(agentId), game.ConfName)
-	if pool.LessThan(totalWin) {
-		zap.L().Debug("QKLSettleMultiplayer:赔付失败", zap.Any("req", req))
-		resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
-		return resp, nil
-	}
 	//批量更新积分
 	for _, item := range req.Records {
 		roundId := fmt.Sprintf("%s#%d", item.RoundID, item.UserId)

@@ -417,7 +417,8 @@ func (d *LotteryService) SlotsBet(webId uint32, exchange decimal.Decimal, ur *en
 		if bet.LessThan(award) {
 			b = true
 			_, ok := dao.CacheIns().Lottery(int64(req.AgentId), int32(req.PlayerId), pc, eGame.ConfName, req.CurrencyType, exBet, exAward, ur.Common.RecordId)
-			if !ok {
+			if !ok { dao.CacheIns().ChangePool(int64(req.AgentId), int32(req.PlayerId), eGame.ConfName, req.CurrencyType, ur.Common.RecordId, exBet, exAward, pc.Pool[1].Revenue) }
+			if false && !ok {
 				return 0, false, services.ErrorCode_NO_ENOUGH_POOL_MONEY
 			}
 		}
