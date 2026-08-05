@@ -600,11 +600,13 @@ func (d *LotteryService) BulkPoolLog(data []*view.PoolLogItem) error {
 	return err
 }
 
-func ConvertRecord(agentId, userId uint32, recordID, currencyType, symbol, account, log string, newCurrency decimal.Decimal, webID uint32, complete bool, totalBet, win float64) *entity.CacheRecordsReq {
+// ConvertRecord 将结算金额和抽水按玩家币种及 CNY 两种口径写入注单。
+func ConvertRecord(agentId, userId uint32, recordID, currencyType, symbol, account, log string, newCurrency decimal.Decimal, webID uint32, complete bool, totalBet, win, pumpAmount float64) *entity.CacheRecordsReq {
 	rate, _ := config.CfgIns.GetExchange(currencyType)
 	p := config.CfgIns.GetPoolCfg(int64(agentId), symbol)
 	bet := decimal.NewFromFloat(totalBet)
 	award := decimal.NewFromFloat(win)
+	pump := decimal.NewFromFloat(pumpAmount)
 	chips := bet
 	if chips.LessThan(award) {
 		chips = award
@@ -635,6 +637,8 @@ func ConvertRecord(agentId, userId uint32, recordID, currencyType, symbol, accou
 		RowVersion:     time.Now().UnixNano(),
 		Revenue:        revenue.Truncate(4).InexactFloat64(),
 		ExRevenue:      revenue.Mul(rate).Truncate(4).InexactFloat64(),
+		Pump:           pump.Truncate(4).InexactFloat64(),
+		ExPump:         pump.Mul(rate).Truncate(4).InexactFloat64(),
 		Log:            log,
 		GameName:       p.Name,
 		Balance:        newCurrency.Truncate(4).InexactFloat64(),
@@ -1129,6 +1133,7 @@ type settlementItemRuntime struct {
 	betAmount    decimal.Decimal
 	payout       decimal.Decimal
 	profit       decimal.Decimal
+	pump         decimal.Decimal
 	record       string
 	exchange     decimal.Decimal
 }
@@ -1262,6 +1267,11 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
+		pump, pumpErr := parseMoney(item.Pump)
+		if pumpErr != nil || (mode == financeModeVoidRefund && !pump.IsZero()) {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			return resp, nil
+		}
 		if mode == financeModeVoidRefund && !payout.Equal(betAmount) {
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
@@ -1288,6 +1298,7 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 			betAmount:    betAmount,
 			payout:       payout,
 			profit:       profit,
+			pump:         pump,
 			record:       item.Record,
 			exchange:     exchange,
 		}
@@ -1352,7 +1363,7 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		}
 		newCurrency := decimalFromCent(currentCurrency).Truncate(2)
 		account := dao.CacheIns().GetPlayerAccount(int64(req.Agent), int64(item.userID))
-		record := ConvertRecord(req.Agent, item.userID, req.RoundId, item.currencyType, runtime.Symbol, account, item.record, newCurrency, runtime.WebID, true, item.betAmount.InexactFloat64(), item.payout.InexactFloat64())
+		record := ConvertRecord(req.Agent, item.userID, req.RoundId, item.currencyType, runtime.Symbol, account, item.record, newCurrency, runtime.WebID, true, item.betAmount.InexactFloat64(), item.payout.InexactFloat64(), item.pump.InexactFloat64())
 		d.SaveRecord(record)
 		if item.payout.GreaterThan(decimal.Zero) {
 			desc := "settlement"

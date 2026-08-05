@@ -33,7 +33,7 @@
 
 - RPC 中的金额使用十进制字符串。
 - 玩家账户余额在 Redis 中以整数“分”为单位保存。
-- `BetItem.amount`、`PrePayItem.payout`、`SettlementItem.betAmount`、`SettlementItem.payout` 和 `SettlementItem.profit` 最多保留两位小数。
+- `BetItem.amount`、`PrePayItem.payout`、`SettlementItem.betAmount`、`SettlementItem.payout`、`SettlementItem.profit` 和 `SettlementItem.pump` 最多保留两位小数。
 - 下注、赔付和税收按 `currencyType` 对应汇率换算为 CNY 后计入奖池。
 - CNY 奖池累计值截断到四位小数。
 - `currencyType` 不参与奖池键；不同币种换算后共同进入同一个 CNY 奖池。
@@ -238,6 +238,7 @@ interface SettlementItem {
   payout: string;
   profit: string;
   record: string;
+  pump: string;
 }
 
 interface SettlementRequest {
@@ -263,6 +264,7 @@ interface SettlementRequest {
 - `items` 必须按 `userId + currencyType` 覆盖本局全部已接受下注账户，不能遗漏或重复。
 - `betAmount` 必须等于该账户在本局全部已接受下注的合计。
 - `profit` 必须等于 `payout - betAmount`，允许为负数。
+- `pump` 是游戏侧计算的玩家币种抽水金额，必须为非负金额且最多保留两位小数。
 - 真人玩家输且 `payout=0` 时仍必须提交结算项。
 - 所有请求项通过校验后才开始批量修改玩家余额。
 
@@ -273,6 +275,7 @@ interface SettlementRequest {
 - 实际赔付 CNY 总额不能超过预留总额。
 - 将各玩家 `payout` 加入玩家余额。
 - 将实际赔付 CNY 累加到 `agent_profitLoss_data`。
+- 注单同时保存原币种抽水 `pmup`，以及按汇率换算为 CNY 的抽水 `exPmup`；抽水不参与当前奖池公式。
 - 释放整笔预留，状态进入 `SETTLED`。
 - 实际赔付小于预留时，差额因整笔预留释放而自动回到可用奖池。
 
@@ -280,6 +283,7 @@ interface SettlementRequest {
 
 - 目前只支持整局全额退款，不支持部分退款。
 - 每个账户必须满足 `payout = betAmount` 和 `profit = 0`。
+- 每个账户的 `pump` 必须为 `0`。
 - `payout` 为空时，服务自动使用 `betAmount`。
 - 如果存在有效预留，必须提交匹配的 `reservationId + outcomeHash`。
 - 将下注原路退回玩家余额。

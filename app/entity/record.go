@@ -36,6 +36,7 @@ type CacheRecordsReq struct {
 	Revenue        float64 `json:"revenue"`
 	ExRevenue      float64 `json:"exRevenue"`
 	Pump           float64 `json:"pmup"`
+	ExPump         float64 `json:"exPmup"` // 转换为 CNY 后的抽水金额。
 	GameName       string  `json:"gameName"`
 	Chips          float64 `json:"chips"`
 	Complete       bool    `json:"complete"`

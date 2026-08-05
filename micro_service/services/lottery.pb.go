@@ -670,7 +670,9 @@ type SettlementItem struct {
 	// 玩家净利润，必须等于 payout - betAmount，允许为负数。
 	Profit string `protobuf:"bytes,5,opt,name=profit,proto3" json:"profit,omitempty"`
 	// 游戏侧提供的完整注单详情。
-	Record        string `protobuf:"bytes,6,opt,name=record,proto3" json:"record,omitempty"`
+	Record string `protobuf:"bytes,6,opt,name=record,proto3" json:"record,omitempty"`
+	// 游戏侧计算的抽水金额，使用玩家币种。
+	Pump          string `protobuf:"bytes,7,opt,name=pump,proto3" json:"pump,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -743,6 +745,13 @@ func (x *SettlementItem) GetProfit() string {
 func (x *SettlementItem) GetRecord() string {
 	if x != nil {
 		return x.Record
+	}
+	return ""
+}
+
+func (x *SettlementItem) GetPump() string {
+	if x != nil {
+		return x.Pump
 	}
 	return ""
 }
@@ -1236,14 +1245,15 @@ const file_lottery_proto_rawDesc = "" +
 	"\x06reason\x18\b \x01(\tR\x06reason\x12\x1c\n" +
 	"\tbetDigest\x18\t \x01(\tR\tbetDigest\x12 \n" +
 	"\voutcomeHash\x18\n" +
-	" \x01(\tR\voutcomeHash\"\xb2\x01\n" +
+	" \x01(\tR\voutcomeHash\"\xc6\x01\n" +
 	"\x0eSettlementItem\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\"\n" +
 	"\fcurrencyType\x18\x02 \x01(\tR\fcurrencyType\x12\x1c\n" +
 	"\tbetAmount\x18\x03 \x01(\tR\tbetAmount\x12\x16\n" +
 	"\x06payout\x18\x04 \x01(\tR\x06payout\x12\x16\n" +
 	"\x06profit\x18\x05 \x01(\tR\x06profit\x12\x16\n" +
-	"\x06record\x18\x06 \x01(\tR\x06record\"\xbe\x02\n" +
+	"\x06record\x18\x06 \x01(\tR\x06record\x12\x12\n" +
+	"\x04pump\x18\a \x01(\tR\x04pump\"\xbe\x02\n" +
 	"\x11SettlementRequest\x12\"\n" +
 	"\fsettlementId\x18\x01 \x01(\tR\fsettlementId\x12\x18\n" +
 	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x16\n" +

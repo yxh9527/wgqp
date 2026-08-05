@@ -129,6 +129,8 @@ message SettlementItem {
     string profit = 5;
     // 游戏侧提供的完整注单详情。
     string record = 6;
+    // 游戏侧计算的抽水金额，使用玩家币种。
+    string pump = 7;
 }
 
 // 批量结算请求，必须覆盖本局全部有效真人玩家且不能重复。
