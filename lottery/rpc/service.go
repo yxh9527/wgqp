@@ -30,8 +30,8 @@ import (
 const (
 	// financeRoundHash 保存全部牌局的资金状态快照。
 	financeRoundHash = "lottery_finance_rounds"
-	// 未指定预留时长时，默认锁定奖池 60 秒。
-	defaultReservationTimeoutSeconds = 60
+	// 未指定预留时长时，默认锁定奖池 300 秒。
+	defaultReservationTimeoutSeconds = 300
 	financeModeNormal                = "NORMAL"
 	financeModeVoidRefund            = "VOID_REFUND"
 )
@@ -43,7 +43,6 @@ const (
 	financeStateReserved financeState = "RESERVED" // 候选结果已经成功锁定赔付额度。
 	financeStateSettled  financeState = "SETTLED"  // 本局已经完成正常结算。
 	financeStateVoided   financeState = "VOIDED"   // 本局下注已经全部原路退回。
-	financeStateReleased financeState = "RELEASED" // 赔付预留已主动释放，但下注尚未退款。
 	financeStateExpired  financeState = "EXPIRED"  // 赔付预留已超时自动释放。
 )
 
@@ -64,7 +63,6 @@ type financeBetSnapshot struct {
 // financeReservation 保存一次候选结果对应的奖池预留凭证。
 type financeReservation struct {
 	RequestID      string `json:"requestId"`
-	RenewRequestID string `json:"renewRequestId,omitempty"`
 	ReservationID  string `json:"reservationId"`
 	BetDigest      string `json:"betDigest"`
 	OutcomeHash    string `json:"outcomeHash"`
@@ -1125,125 +1123,6 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 	return resp, nil
 }
 
-// reservationResponse 将当前预留状态转换成统一生命周期响应。
-func (d *LotteryService) reservationResponse(round *financeRound) *services.PrePayResponse {
-	resp := &services.PrePayResponse{
-		Code:    services.ErrorCode_OK,
-		RoundId: round.RoundID,
-		State:   round.State,
-	}
-	if round.Reservation == nil {
-		return resp
-	}
-	resp.Success = true
-	resp.ReservationId = round.Reservation.ReservationID
-	resp.TotalPayoutCny = round.Reservation.TotalPayoutCNY
-	resp.ExpiresAt = round.Reservation.ExpiresAt
-	resp.BetDigest = round.Reservation.BetDigest
-	resp.OutcomeHash = round.Reservation.OutcomeHash
-	return resp
-}
-
-// RenewPrePay 在预留到期前续租；同一 requestId 重试不会重复延长到期时间。
-func (d *LotteryService) RenewPrePay(_ context.Context, req *services.RenewPrePayRequest) (resp *services.PrePayResponse, err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			zap.L().Error("RenewPrePay panic", zap.Any("err", rec))
-			resp = &services.PrePayResponse{Code: services.ErrorCode_SYSTEM_ERROR}
-			err = nil
-		}
-	}()
-
-	if req.RequestId == "" || req.RoundId == "" || req.ReservationId == "" || req.BetDigest == "" || req.OutcomeHash == "" {
-		return &services.PrePayResponse{Code: services.ErrorCode_PARAMS_INVALID, RoundId: req.RoundId, Reason: "INVALID_REQUEST"}, nil
-	}
-
-	d.roundLock.Lock()
-	defer d.roundLock.Unlock()
-
-	round, ok := d.loadRoundLocked(req.RoundId)
-	if !ok {
-		return &services.PrePayResponse{Code: services.ErrorCode_PARAMS_INVALID, RoundId: req.RoundId, Reason: "INVALID_REQUEST"}, nil
-	}
-	d.expireRoundIfNeededLocked(round)
-	reservation := round.Reservation
-	if reservation == nil || reservation.Status != string(financeStateReserved) ||
-		reservation.ReservationID != req.ReservationId || reservation.BetDigest != req.BetDigest || reservation.OutcomeHash != req.OutcomeHash {
-		resp = d.reservationResponse(round)
-		resp.Code = services.ErrorCode_PARAMS_INVALID
-		resp.Success = false
-		resp.Reason = "ROUND_CONFLICT"
-		return resp, nil
-	}
-	if reservation.RenewRequestID == req.RequestId {
-		return d.reservationResponse(round), nil
-	}
-
-	timeoutSeconds := req.TimeoutSeconds
-	if timeoutSeconds == 0 {
-		timeoutSeconds = defaultReservationTimeoutSeconds
-	}
-	reservation.RenewRequestID = req.RequestId
-	reservation.ExpiresAt = time.Now().Add(time.Duration(timeoutSeconds) * time.Second).Unix()
-	d.saveRoundLocked(round)
-	return d.reservationResponse(round), nil
-}
-
-// ReleasePrePay 主动释放尚未结算的预留，但不会退还本局已经扣除的下注。
-func (d *LotteryService) ReleasePrePay(_ context.Context, req *services.ReleasePrePayRequest) (resp *services.PrePayResponse, err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			zap.L().Error("ReleasePrePay panic", zap.Any("err", rec))
-			resp = &services.PrePayResponse{Code: services.ErrorCode_SYSTEM_ERROR}
-			err = nil
-		}
-	}()
-
-	if req.RequestId == "" || req.RoundId == "" || req.ReservationId == "" || req.BetDigest == "" || req.OutcomeHash == "" {
-		return &services.PrePayResponse{Code: services.ErrorCode_PARAMS_INVALID, RoundId: req.RoundId, Reason: "INVALID_REQUEST"}, nil
-	}
-
-	d.roundLock.Lock()
-	defer d.roundLock.Unlock()
-
-	round, ok := d.loadRoundLocked(req.RoundId)
-	if !ok {
-		return &services.PrePayResponse{Code: services.ErrorCode_PARAMS_INVALID, RoundId: req.RoundId, Reason: "INVALID_REQUEST"}, nil
-	}
-	d.expireRoundIfNeededLocked(round)
-	reservation := round.Reservation
-	if reservation == nil || reservation.ReservationID != req.ReservationId || reservation.BetDigest != req.BetDigest || reservation.OutcomeHash != req.OutcomeHash {
-		resp = d.reservationResponse(round)
-		resp.Code = services.ErrorCode_PARAMS_INVALID
-		resp.Success = false
-		resp.Reason = "ROUND_CONFLICT"
-		return resp, nil
-	}
-	if reservation.Status == string(financeStateReleased) {
-		return d.reservationResponse(round), nil
-	}
-	if reservation.Status != string(financeStateReserved) {
-		resp = d.reservationResponse(round)
-		resp.Code = services.ErrorCode_PARAMS_INVALID
-		resp.Success = false
-		resp.Reason = "ROUND_CONFLICT"
-		return resp, nil
-	}
-	amount, parseErr := decimal.NewFromString(reservation.TotalPayoutCNY)
-	if parseErr != nil || !dao.CacheIns().ReleasePoolReservation(int64(round.Agent), round.PoolSymbol, amount) {
-		resp = d.reservationResponse(round)
-		resp.Code = services.ErrorCode_SYSTEM_ERROR
-		resp.Success = false
-		resp.Reason = "RESERVATION_RELEASE_FAILED"
-		return resp, nil
-	}
-
-	reservation.Status = string(financeStateReleased)
-	round.State = string(financeStateReleased)
-	d.saveRoundLocked(round)
-	return d.reservationResponse(round), nil
-}
-
 type settlementItemRuntime struct {
 	userID       uint32
 	currencyType string
@@ -1510,7 +1389,7 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 
 	if mode == financeModeVoidRefund {
 		if round.Reservation != nil && round.Reservation.Status == string(financeStateReserved) {
-			round.Reservation.Status = string(financeStateReleased)
+			round.Reservation.Status = string(financeStateVoided)
 		}
 		round.State = string(financeStateVoided)
 	} else {

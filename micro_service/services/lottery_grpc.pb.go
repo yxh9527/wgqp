@@ -21,8 +21,6 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	LotteryService_Bet_FullMethodName                  = "/lottery.LotteryService/Bet"
 	LotteryService_PrePay_FullMethodName               = "/lottery.LotteryService/PrePay"
-	LotteryService_RenewPrePay_FullMethodName          = "/lottery.LotteryService/RenewPrePay"
-	LotteryService_ReleasePrePay_FullMethodName        = "/lottery.LotteryService/ReleasePrePay"
 	LotteryService_Settlement_FullMethodName           = "/lottery.LotteryService/Settlement"
 	LotteryService_GetRoundFinanceState_FullMethodName = "/lottery.LotteryService/GetRoundFinanceState"
 )
@@ -35,13 +33,9 @@ type LotteryServiceClient interface {
 	Bet(ctx context.Context, in *BetRequest, opts ...grpc.CallOption) (*BetResponse, error)
 	// 根据冻结后的下注摘要和候选结果，申请奖池赔付预留。
 	PrePay(ctx context.Context, in *PrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error)
-	// 在预留到期前续租，防止长牌局的赔付额度被自动释放。
-	RenewPrePay(ctx context.Context, in *RenewPrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error)
-	// 在结果公开前主动释放赔付预留，不退还玩家下注。
-	ReleasePrePay(ctx context.Context, in *ReleasePrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error)
 	// 批量结算本局全部真人玩家，或按 VOID_REFUND 原路退回全部下注。
 	Settlement(ctx context.Context, in *SettlementRequest, opts ...grpc.CallOption) (*SettlementResponse, error)
-	// 查询本局资金状态，用于 RPC 超时、重连和服务迁移后的恢复。
+	// 查询本局资金状态，用于 RPC 超时确认和人工审核。
 	GetRoundFinanceState(ctx context.Context, in *GetRoundFinanceStateReq, opts ...grpc.CallOption) (*GetRoundFinanceStateResp, error)
 }
 
@@ -67,26 +61,6 @@ func (c *lotteryServiceClient) PrePay(ctx context.Context, in *PrePayRequest, op
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PrePayResponse)
 	err := c.cc.Invoke(ctx, LotteryService_PrePay_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) RenewPrePay(ctx context.Context, in *RenewPrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PrePayResponse)
-	err := c.cc.Invoke(ctx, LotteryService_RenewPrePay_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) ReleasePrePay(ctx context.Context, in *ReleasePrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PrePayResponse)
-	err := c.cc.Invoke(ctx, LotteryService_ReleasePrePay_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -121,13 +95,9 @@ type LotteryServiceServer interface {
 	Bet(context.Context, *BetRequest) (*BetResponse, error)
 	// 根据冻结后的下注摘要和候选结果，申请奖池赔付预留。
 	PrePay(context.Context, *PrePayRequest) (*PrePayResponse, error)
-	// 在预留到期前续租，防止长牌局的赔付额度被自动释放。
-	RenewPrePay(context.Context, *RenewPrePayRequest) (*PrePayResponse, error)
-	// 在结果公开前主动释放赔付预留，不退还玩家下注。
-	ReleasePrePay(context.Context, *ReleasePrePayRequest) (*PrePayResponse, error)
 	// 批量结算本局全部真人玩家，或按 VOID_REFUND 原路退回全部下注。
 	Settlement(context.Context, *SettlementRequest) (*SettlementResponse, error)
-	// 查询本局资金状态，用于 RPC 超时、重连和服务迁移后的恢复。
+	// 查询本局资金状态，用于 RPC 超时确认和人工审核。
 	GetRoundFinanceState(context.Context, *GetRoundFinanceStateReq) (*GetRoundFinanceStateResp, error)
 	mustEmbedUnimplementedLotteryServiceServer()
 }
@@ -144,12 +114,6 @@ func (UnimplementedLotteryServiceServer) Bet(context.Context, *BetRequest) (*Bet
 }
 func (UnimplementedLotteryServiceServer) PrePay(context.Context, *PrePayRequest) (*PrePayResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PrePay not implemented")
-}
-func (UnimplementedLotteryServiceServer) RenewPrePay(context.Context, *RenewPrePayRequest) (*PrePayResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RenewPrePay not implemented")
-}
-func (UnimplementedLotteryServiceServer) ReleasePrePay(context.Context, *ReleasePrePayRequest) (*PrePayResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReleasePrePay not implemented")
 }
 func (UnimplementedLotteryServiceServer) Settlement(context.Context, *SettlementRequest) (*SettlementResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Settlement not implemented")
@@ -214,42 +178,6 @@ func _LotteryService_PrePay_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LotteryService_RenewPrePay_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RenewPrePayRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).RenewPrePay(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_RenewPrePay_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).RenewPrePay(ctx, req.(*RenewPrePayRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_ReleasePrePay_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReleasePrePayRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).ReleasePrePay(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_ReleasePrePay_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).ReleasePrePay(ctx, req.(*ReleasePrePayRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _LotteryService_Settlement_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SettlementRequest)
 	if err := dec(in); err != nil {
@@ -300,14 +228,6 @@ var LotteryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PrePay",
 			Handler:    _LotteryService_PrePay_Handler,
-		},
-		{
-			MethodName: "RenewPrePay",
-			Handler:    _LotteryService_RenewPrePay_Handler,
-		},
-		{
-			MethodName: "ReleasePrePay",
-			Handler:    _LotteryService_ReleasePrePay_Handler,
 		},
 		{
 			MethodName: "Settlement",

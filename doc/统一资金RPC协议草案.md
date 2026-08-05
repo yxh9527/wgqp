@@ -6,14 +6,14 @@
 
 统一资金服务只处理真人玩家的下注、奖池预留、结算、退款和资金状态查询，不生成游戏结果，也不负责游戏控制策略。
 
-当前提供六个 RPC：
+当前提供四个 RPC：
 
 1. `Bet`：扣除玩家余额并登记本局下注。
 2. `PrePay`：按冻结后的下注集合和候选结果申请赔付预留。
-3. `RenewPrePay`：延长有效预留的到期时间。
-4. `ReleasePrePay`：主动释放尚未结算的预留。
-5. `Settlement`：正常赔付或整局全额退款。
-6. `GetRoundFinanceState`：查询牌局资金状态，用于超时确认、故障恢复和人工审核。
+3. `Settlement`：正常赔付或整局全额退款。
+4. `GetRoundFinanceState`：查询牌局资金状态，用于超时确认、故障后的状态核对和人工审核。
+
+赔付预留只用于单人房游戏，默认有效期为 300 秒，不提供续期和主动释放接口。有效预留只能通过 `Settlement(NORMAL)`、`Settlement(VOID_REFUND)` 或到期自动回收结束。
 
 游戏服务发生故障后，不自动继续旧牌局。恢复后的游戏必须生成新的 `roundId`；旧牌局资金状态保留，由人工审核后决定是否调用 `VOID_REFUND`。
 
@@ -81,7 +81,7 @@ AvailablePool = E - P - R - Q
 | --------------------------- | -----------: | ---------------: | -----------: | ---------------: |
 | `Bet` 成功                | 增加下注 CNY |             不变 | 增加下注税收 |             不变 |
 | `PrePay` 成功             |         不变 |             不变 |         不变 | 增加预计赔付 CNY |
-| `ReleasePrePay` / 超时    |         不变 |             不变 |         不变 |     减少对应预留 |
+| 超时自动回收              |         不变 |             不变 |         不变 |     减少对应预留 |
 | `Settlement(NORMAL)`      |         不变 | 增加实际赔付 CNY |         不变 |     释放整笔预留 |
 | `Settlement(VOID_REFUND)` | 撤销本局下注 |             不变 | 撤销本局税收 |     释放整笔预留 |
 
@@ -96,7 +96,6 @@ BETTING   允许首次下注和追加下注
 RESERVED  已建立有效赔付预留
 SETTLED   已完成正常结算
 VOIDED    已完成整局全额退款
-RELEASED  预留已主动释放，下注尚未退款
 EXPIRED   预留已超时释放，下注尚未退款
 ```
 
@@ -104,16 +103,14 @@ EXPIRED   预留已超时释放，下注尚未退款
 
 ```text
 BETTING -> RESERVED -> SETTLED
-                    -> RELEASED
                     -> EXPIRED
                     -> VOIDED
 
 BETTING  -> VOIDED
-RELEASED -> RESERVED 或 VOIDED
 EXPIRED  -> RESERVED 或 VOIDED
 ```
 
-`RELEASED` 和 `EXPIRED` 只表示预留已经释放，不代表下注已经退回。只有 `Settlement(mode=VOID_REFUND)` 才会退还下注并进入 `VOIDED`。
+`EXPIRED` 只表示预留已经自动释放，不代表下注已经退回。只有 `Settlement(mode=VOID_REFUND)` 才会退还下注并进入 `VOIDED`。
 
 ## 6. Bet
 
@@ -207,15 +204,15 @@ interface PrePayResponse {
 - `payout` 是实际返还玩家的总金额，不是净利润。
 - 所有 `payout` 按币种汇率换算为 CNY 后汇总为 `totalPayoutCny`。
 - Redis Lua 使用 `BasePool - 当前有效预留 >= 本次预留` 判断是否可预留，并在成功时原子增加 `agent_reserved_data`。
-- `timeoutSeconds=0` 时使用默认值 60 秒。
+- `timeoutSeconds=0` 时使用默认值 300 秒。该字段为兼容现有协议保留，单人房游戏应传 `0`，由资金服务统一使用默认超时。
 - 成功后牌局进入 `RESERVED`，不再接受下注。
 
 ### 7.3 幂等与冲突
 
 - 牌局已经存在有效预留，且 `betDigest + outcomeHash` 一致时，直接返回原 `reservationId`。
-- 已存在有效预留但 `outcomeHash` 不同，返回 `ROUND_CONFLICT`。调用方必须先释放原预留，再申请新候选。
+- 已存在有效预留但 `outcomeHash` 不同，返回 `ROUND_CONFLICT`。有效期内不允许切换候选结果；只能完成结算、执行整局退款，或等待预留超时后再申请新候选。
 - `SETTLED` 和 `VOIDED` 不允许再次预留。
-- `RELEASED` 或 `EXPIRED` 可以重新调用 `PrePay` 建立新预留。
+- `EXPIRED` 可以重新调用 `PrePay` 建立新预留。
 
 `reason` 当前可能为：
 
@@ -227,49 +224,9 @@ INSUFFICIENT_POOL
 RESERVATION_PERSIST_FAILED
 ```
 
-## 8. RenewPrePay
+## 8. Settlement
 
-```ts
-interface RenewPrePayRequest {
-  requestId: string;
-  roundId: string;
-  reservationId: string;
-  betDigest: string;
-  outcomeHash: string;
-  timeoutSeconds: number;
-}
-```
-
-- 只允许续租状态为 `RESERVED` 且未过期的预留。
-- `reservationId + betDigest + outcomeHash` 必须与当前预留完全一致。
-- 新到期时间按 `当前时间 + timeoutSeconds` 计算，不是在旧到期时间上累加。
-- `timeoutSeconds=0` 使用默认值 60 秒。
-- 当前只保存最后一次续租的 `requestId`；相同 `requestId` 立即重试时返回当前结果，不重复延长。
-
-## 9. ReleasePrePay
-
-```ts
-interface ReleasePrePayRequest {
-  requestId: string;
-  roundId: string;
-  reservationId: string;
-  betDigest: string;
-  outcomeHash: string;
-}
-```
-
-- 必须完整匹配当前预留凭证。
-- Redis Lua 从 `agent_reserved_data` 释放对应金额。
-- 释放成功后，预留和牌局状态改为 `RELEASED`。
-- 重复释放同一个已进入 `RELEASED` 的预留，返回当前结果，不重复扣减汇总预留。
-- 该接口只释放奖池额度，不退还玩家下注。需要退款时必须继续调用 `Settlement(mode=VOID_REFUND)`。
-- `requestId` 当前只校验非空，不单独保存释放请求记录。
-
-释放失败时 `reason=RESERVATION_RELEASE_FAILED`。
-
-## 10. Settlement
-
-### 10.1 请求
+### 8.1 请求
 
 ```ts
 type SettlementMode = "NORMAL" | "VOID_REFUND";
@@ -299,7 +256,7 @@ interface SettlementRequest {
 
 `mode` 为空时按 `NORMAL` 处理。
 
-### 10.2 共同校验
+### 8.2 共同校验
 
 - `settlementId` 必须非空。
 - `betDigest` 必须与资金服务计算结果完全一致。
@@ -309,7 +266,7 @@ interface SettlementRequest {
 - 真人玩家输且 `payout=0` 时仍必须提交结算项。
 - 所有请求项通过校验后才开始批量修改玩家余额。
 
-### 10.3 NORMAL
+### 8.3 NORMAL
 
 - 必须存在状态为 `RESERVED` 的有效预留。
 - `reservationId` 和 `outcomeHash` 必须与预留完全一致。
@@ -319,7 +276,7 @@ interface SettlementRequest {
 - 释放整笔预留，状态进入 `SETTLED`。
 - 实际赔付小于预留时，差额因整笔预留释放而自动回到可用奖池。
 
-### 10.4 VOID_REFUND
+### 8.4 VOID_REFUND
 
 - 目前只支持整局全额退款，不支持部分退款。
 - 每个账户必须满足 `payout = betAmount` 和 `profit = 0`。
@@ -331,13 +288,13 @@ interface SettlementRequest {
 - 如果存在有效预留，同时释放该预留。
 - 最终状态进入 `VOIDED`。
 
-### 10.5 幂等
+### 8.5 幂等
 
 - 相同 `settlementId` 重试返回首次保存的结算结果，不重复入账。
 - 牌局已 `SETTLED` 或 `VOIDED` 后使用其他 `settlementId`，返回参数错误。
 - RPC 超时后必须先调用 `GetRoundFinanceState`，不能直接更换 `settlementId` 重试。
 
-## 11. GetRoundFinanceState
+## 9. GetRoundFinanceState
 
 ```ts
 interface GetRoundFinanceStateRequest {
@@ -363,19 +320,19 @@ interface GetRoundFinanceStateResponse {
 - 只有预留仍处于 `RESERVED` 时，`totalReservedCny` 返回预留金额；其他状态返回 `0`。
 - 牌局不存在时当前返回 `PARAMS_INVALID`。
 
-## 12. 预留超时与回收
+## 10. 预留超时与回收
 
 - 服务每 5 秒扫描一次内存中的牌局。
 - `expiresAt` 使用 Unix 秒。
 - 到期后先通过 Redis Lua 释放 `agent_reserved_data`，成功后再把预留和牌局状态改为 `EXPIRED`。
 - Redis 释放失败时状态保持 `RESERVED`，后续扫描继续重试。
-- `Bet`、`PrePay`、`RenewPrePay`、`ReleasePrePay`、`Settlement` 和 `GetRoundFinanceState` 处理牌局时也会执行到期检查。
+- `Bet`、`PrePay`、`Settlement` 和 `GetRoundFinanceState` 处理牌局时也会执行到期检查。
 - 服务启动时从 `lottery_finance_rounds` 恢复牌局，已过期预留会在下一轮扫描或下一次 RPC 访问时回收。
 - 正常运行时，预留通常会在到期后的 5 秒内回收。
 
 预留释放只恢复可用奖池，不自动退还玩家下注。超时牌局进入 `EXPIRED` 后，应由游戏重新预赔，或由人工审核后执行整局退款。
 
-## 13. Redis 持久化与恢复
+## 11. Redis 持久化与恢复
 
 牌局状态保存在：
 
@@ -395,7 +352,7 @@ value = financeRound JSON
 
 `agent_effect_data`、`agent_profitLoss_data`、`agent_revenue_data` 和 `agent_chips_data` 当前在 lottery 进程内缓存修改，每 30 秒批量写入 Redis。`agent_reserved_data` 在预留生命周期操作中直接通过 Redis Lua 更新。
 
-## 14. 调用顺序
+## 12. 调用顺序
 
 正常游戏：
 
@@ -404,18 +361,11 @@ value = financeRound JSON
   -> 封盘并冻结订单
   -> 生成完整候选结果和 outcomeHash
   -> PrePay
-  -> 必要时 RenewPrePay
   -> 固定并公开结果
   -> Settlement(NORMAL)
 ```
 
-候选结果需要切换且原结果尚未公开：
-
-```text
-PrePay(候选 A)
-  -> ReleasePrePay(候选 A)
-  -> PrePay(候选 B)
-```
+有效预留期间不支持切换候选结果。若确实需要切换，只能等待预留超时进入 `EXPIRED` 后重新调用 `PrePay`；若牌局已经故障，则保留旧牌局数据并进入人工审核流程。
 
 游戏未成立或故障后人工确认退款：
 
@@ -427,7 +377,7 @@ GetRoundFinanceState
 
 游戏进程故障恢复后必须创建新的 `roundId`，不自动接续旧牌局。旧牌局保留给人工审核。
 
-## 15. 当前部署约束
+## 13. 当前部署约束
 
 - 玩家余额扣款使用 Redis Lua，单个玩家扣款不会因并发而变成负数。
 - 预留汇总的检查和增加使用 Redis Lua，相同奖池的并发预留不会只依赖进程内计数。
@@ -441,22 +391,22 @@ GetRoundFinanceState
 hash(agentId) -> lottery instance
 ```
 
-`RenewPrePay`、`ReleasePrePay` 和 `GetRoundFinanceState` 请求中没有 `agent` 字段，网关若按代理路由，需要维护 `roundId -> agentId` 路由映射，或先查询共享状态后转发。
+`GetRoundFinanceState` 请求中没有 `agent` 字段，网关若按代理路由，需要维护 `roundId -> agentId` 路由映射，或先查询共享状态后转发。
 
-## 16. 当前一致性边界
+## 14. 当前一致性边界
 
 以下操作目前不是一个完整的跨存储事务：
 
 1. 玩家余额修改、奖池缓存修改、牌局快照写入和 ES 注单/流水落地。
 2. `PrePay` 增加 `agent_reserved_data` 与保存 `RESERVED` 牌局快照。
-3. 超时、主动释放或结算时减少 `agent_reserved_data` 与保存最终牌局状态。
+3. 超时或结算时减少 `agent_reserved_data` 与保存最终牌局状态。
 4. 批量结算多个玩家余额与最终牌局状态保存。
 
 如果进程在上述步骤之间崩溃，可能出现余额已变更但状态未落库、预留汇总与牌局状态不一致，或 ES 明细延迟/失败。当前处理方式是保留牌局和资金数据，由人工审核；系统不会在不确定时自动退款。
 
 `agent_reserved_data` 目前只保存每个奖池的汇总预留金额，不保存每个 `reservationId` 的独立账本。每笔预留详情保存在 `lottery_finance_rounds`。严格的崩溃一致性仍需要把“按 reservationId 去重、更新汇总预留、更新牌局状态”合并为同一个 Redis 原子操作。
 
-## 17. 当前未实现能力
+## 15. 当前未实现能力
 
 - 部分退款。
 - 实际赔付超过预留时的追加预留。

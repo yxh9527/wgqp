@@ -11,13 +11,9 @@ service LotteryService {
     rpc Bet(BetRequest) returns (BetResponse);
     // 根据冻结后的下注摘要和候选结果，申请奖池赔付预留。
     rpc PrePay(PrePayRequest) returns (PrePayResponse);
-    // 在预留到期前续租，防止长牌局的赔付额度被自动释放。
-    rpc RenewPrePay(RenewPrePayRequest) returns (PrePayResponse);
-    // 在结果公开前主动释放赔付预留，不退还玩家下注。
-    rpc ReleasePrePay(ReleasePrePayRequest) returns (PrePayResponse);
     // 批量结算本局全部真人玩家，或按 VOID_REFUND 原路退回全部下注。
     rpc Settlement(SettlementRequest) returns (SettlementResponse);
-    // 查询本局资金状态，用于 RPC 超时、重连和服务迁移后的恢复。
+    // 查询本局资金状态，用于 RPC 超时确认和人工审核。
     rpc GetRoundFinanceState(GetRoundFinanceStateReq) returns (GetRoundFinanceStateResp);
 }
 
@@ -97,15 +93,15 @@ message PrePayRequest {
     string betDigest = 6;
     // 完整候选游戏结果的摘要。
     string outcomeHash = 7;
-    // 预留有效秒数；传 0 使用服务默认值。
+    // 预留有效秒数；传 0 使用服务默认值 300 秒。
     uint32 timeoutSeconds = 8;
     repeated PrePayItem items = 9;
 }
 
-// 预留、续租和释放共用的响应结构。
+// 赔付预留响应。
 message PrePayResponse {
     base.error_code code = 1;
-    // true 表示本次预留生命周期操作成功。
+    // true 表示本次赔付预留成功。
     bool success = 2;
     string roundId = 3;
     string state = 4;
@@ -119,25 +115,6 @@ message PrePayResponse {
     string reason = 8;
     string betDigest = 9;
     string outcomeHash = 10;
-}
-
-// 预留续租请求；同一 requestId 重试不会重复延长有效期。
-message RenewPrePayRequest {
-    string requestId = 1;
-    string roundId = 2;
-    string reservationId = 3;
-    string betDigest = 4;
-    string outcomeHash = 5;
-    uint32 timeoutSeconds = 6;
-}
-
-// 主动释放预留请求，必须携带完整预留凭证。
-message ReleasePrePayRequest {
-    string requestId = 1;
-    string roundId = 2;
-    string reservationId = 3;
-    string betDigest = 4;
-    string outcomeHash = 5;
 }
 
 // 单个真人玩家的结算数据。
@@ -196,7 +173,7 @@ message GetRoundFinanceStateReq {
 message GetRoundFinanceStateResp {
     base.error_code code = 1;
     string roundId = 2;
-    // BETTING、RESERVED、SETTLED、VOIDED、RELEASED 或 EXPIRED。
+    // BETTING、RESERVED、SETTLED、VOIDED 或 EXPIRED。
     string state = 3;
     string betDigest = 4;
     string reservationId = 5;

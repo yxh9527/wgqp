@@ -436,7 +436,7 @@ type PrePayRequest struct {
 	BetDigest string `protobuf:"bytes,6,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
 	// 完整候选游戏结果的摘要。
 	OutcomeHash string `protobuf:"bytes,7,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
-	// 预留有效秒数；传 0 使用服务默认值。
+	// 预留有效秒数；传 0 使用服务默认值 300 秒。
 	TimeoutSeconds uint32        `protobuf:"varint,8,opt,name=timeoutSeconds,proto3" json:"timeoutSeconds,omitempty"`
 	Items          []*PrePayItem `protobuf:"bytes,9,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields  protoimpl.UnknownFields
@@ -536,11 +536,11 @@ func (x *PrePayRequest) GetItems() []*PrePayItem {
 	return nil
 }
 
-// 预留、续租和释放共用的响应结构。
+// 赔付预留响应。
 type PrePayResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Code  ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	// true 表示本次预留生命周期操作成功。
+	// true 表示本次赔付预留成功。
 	Success bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	RoundId string `protobuf:"bytes,3,opt,name=roundId,proto3" json:"roundId,omitempty"`
 	State   string `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
@@ -658,168 +658,6 @@ func (x *PrePayResponse) GetOutcomeHash() string {
 	return ""
 }
 
-// 预留续租请求；同一 requestId 重试不会重复延长有效期。
-type RenewPrePayRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	RequestId      string                 `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
-	RoundId        string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
-	ReservationId  string                 `protobuf:"bytes,3,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
-	BetDigest      string                 `protobuf:"bytes,4,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
-	OutcomeHash    string                 `protobuf:"bytes,5,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
-	TimeoutSeconds uint32                 `protobuf:"varint,6,opt,name=timeoutSeconds,proto3" json:"timeoutSeconds,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *RenewPrePayRequest) Reset() {
-	*x = RenewPrePayRequest{}
-	mi := &file_lottery_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RenewPrePayRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RenewPrePayRequest) ProtoMessage() {}
-
-func (x *RenewPrePayRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RenewPrePayRequest.ProtoReflect.Descriptor instead.
-func (*RenewPrePayRequest) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *RenewPrePayRequest) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *RenewPrePayRequest) GetRoundId() string {
-	if x != nil {
-		return x.RoundId
-	}
-	return ""
-}
-
-func (x *RenewPrePayRequest) GetReservationId() string {
-	if x != nil {
-		return x.ReservationId
-	}
-	return ""
-}
-
-func (x *RenewPrePayRequest) GetBetDigest() string {
-	if x != nil {
-		return x.BetDigest
-	}
-	return ""
-}
-
-func (x *RenewPrePayRequest) GetOutcomeHash() string {
-	if x != nil {
-		return x.OutcomeHash
-	}
-	return ""
-}
-
-func (x *RenewPrePayRequest) GetTimeoutSeconds() uint32 {
-	if x != nil {
-		return x.TimeoutSeconds
-	}
-	return 0
-}
-
-// 主动释放预留请求，必须携带完整预留凭证。
-type ReleasePrePayRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
-	RoundId       string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
-	ReservationId string                 `protobuf:"bytes,3,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
-	BetDigest     string                 `protobuf:"bytes,4,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
-	OutcomeHash   string                 `protobuf:"bytes,5,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReleasePrePayRequest) Reset() {
-	*x = ReleasePrePayRequest{}
-	mi := &file_lottery_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReleasePrePayRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReleasePrePayRequest) ProtoMessage() {}
-
-func (x *ReleasePrePayRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReleasePrePayRequest.ProtoReflect.Descriptor instead.
-func (*ReleasePrePayRequest) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *ReleasePrePayRequest) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *ReleasePrePayRequest) GetRoundId() string {
-	if x != nil {
-		return x.RoundId
-	}
-	return ""
-}
-
-func (x *ReleasePrePayRequest) GetReservationId() string {
-	if x != nil {
-		return x.ReservationId
-	}
-	return ""
-}
-
-func (x *ReleasePrePayRequest) GetBetDigest() string {
-	if x != nil {
-		return x.BetDigest
-	}
-	return ""
-}
-
-func (x *ReleasePrePayRequest) GetOutcomeHash() string {
-	if x != nil {
-		return x.OutcomeHash
-	}
-	return ""
-}
-
 // 单个真人玩家的结算数据。
 type SettlementItem struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
@@ -839,7 +677,7 @@ type SettlementItem struct {
 
 func (x *SettlementItem) Reset() {
 	*x = SettlementItem{}
-	mi := &file_lottery_proto_msgTypes[9]
+	mi := &file_lottery_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -851,7 +689,7 @@ func (x *SettlementItem) String() string {
 func (*SettlementItem) ProtoMessage() {}
 
 func (x *SettlementItem) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[9]
+	mi := &file_lottery_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -864,7 +702,7 @@ func (x *SettlementItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettlementItem.ProtoReflect.Descriptor instead.
 func (*SettlementItem) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{9}
+	return file_lottery_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SettlementItem) GetUserId() uint32 {
@@ -930,7 +768,7 @@ type SettlementRequest struct {
 
 func (x *SettlementRequest) Reset() {
 	*x = SettlementRequest{}
-	mi := &file_lottery_proto_msgTypes[10]
+	mi := &file_lottery_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -942,7 +780,7 @@ func (x *SettlementRequest) String() string {
 func (*SettlementRequest) ProtoMessage() {}
 
 func (x *SettlementRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[10]
+	mi := &file_lottery_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -955,7 +793,7 @@ func (x *SettlementRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettlementRequest.ProtoReflect.Descriptor instead.
 func (*SettlementRequest) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{10}
+	return file_lottery_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SettlementRequest) GetSettlementId() string {
@@ -1041,7 +879,7 @@ type SettlementItemResult struct {
 
 func (x *SettlementItemResult) Reset() {
 	*x = SettlementItemResult{}
-	mi := &file_lottery_proto_msgTypes[11]
+	mi := &file_lottery_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1053,7 +891,7 @@ func (x *SettlementItemResult) String() string {
 func (*SettlementItemResult) ProtoMessage() {}
 
 func (x *SettlementItemResult) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[11]
+	mi := &file_lottery_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1066,7 +904,7 @@ func (x *SettlementItemResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettlementItemResult.ProtoReflect.Descriptor instead.
 func (*SettlementItemResult) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{11}
+	return file_lottery_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SettlementItemResult) GetUserId() uint32 {
@@ -1111,7 +949,7 @@ type SettlementResponse struct {
 
 func (x *SettlementResponse) Reset() {
 	*x = SettlementResponse{}
-	mi := &file_lottery_proto_msgTypes[12]
+	mi := &file_lottery_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1123,7 +961,7 @@ func (x *SettlementResponse) String() string {
 func (*SettlementResponse) ProtoMessage() {}
 
 func (x *SettlementResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[12]
+	mi := &file_lottery_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1136,7 +974,7 @@ func (x *SettlementResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettlementResponse.ProtoReflect.Descriptor instead.
 func (*SettlementResponse) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{12}
+	return file_lottery_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SettlementResponse) GetCode() ErrorCode {
@@ -1184,7 +1022,7 @@ type GetRoundFinanceStateReq struct {
 
 func (x *GetRoundFinanceStateReq) Reset() {
 	*x = GetRoundFinanceStateReq{}
-	mi := &file_lottery_proto_msgTypes[13]
+	mi := &file_lottery_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1196,7 +1034,7 @@ func (x *GetRoundFinanceStateReq) String() string {
 func (*GetRoundFinanceStateReq) ProtoMessage() {}
 
 func (x *GetRoundFinanceStateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[13]
+	mi := &file_lottery_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1209,7 +1047,7 @@ func (x *GetRoundFinanceStateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoundFinanceStateReq.ProtoReflect.Descriptor instead.
 func (*GetRoundFinanceStateReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{13}
+	return file_lottery_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetRoundFinanceStateReq) GetRoundId() string {
@@ -1224,7 +1062,7 @@ type GetRoundFinanceStateResp struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Code    ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
 	RoundId string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
-	// BETTING、RESERVED、SETTLED、VOIDED、RELEASED 或 EXPIRED。
+	// BETTING、RESERVED、SETTLED、VOIDED 或 EXPIRED。
 	State         string `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
 	BetDigest     string `protobuf:"bytes,4,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
 	ReservationId string `protobuf:"bytes,5,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
@@ -1241,7 +1079,7 @@ type GetRoundFinanceStateResp struct {
 
 func (x *GetRoundFinanceStateResp) Reset() {
 	*x = GetRoundFinanceStateResp{}
-	mi := &file_lottery_proto_msgTypes[14]
+	mi := &file_lottery_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1253,7 +1091,7 @@ func (x *GetRoundFinanceStateResp) String() string {
 func (*GetRoundFinanceStateResp) ProtoMessage() {}
 
 func (x *GetRoundFinanceStateResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[14]
+	mi := &file_lottery_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1266,7 +1104,7 @@ func (x *GetRoundFinanceStateResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoundFinanceStateResp.ProtoReflect.Descriptor instead.
 func (*GetRoundFinanceStateResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{14}
+	return file_lottery_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetRoundFinanceStateResp) GetCode() ErrorCode {
@@ -1398,20 +1236,7 @@ const file_lottery_proto_rawDesc = "" +
 	"\x06reason\x18\b \x01(\tR\x06reason\x12\x1c\n" +
 	"\tbetDigest\x18\t \x01(\tR\tbetDigest\x12 \n" +
 	"\voutcomeHash\x18\n" +
-	" \x01(\tR\voutcomeHash\"\xda\x01\n" +
-	"\x12RenewPrePayRequest\x12\x1c\n" +
-	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
-	"\aroundId\x18\x02 \x01(\tR\aroundId\x12$\n" +
-	"\rreservationId\x18\x03 \x01(\tR\rreservationId\x12\x1c\n" +
-	"\tbetDigest\x18\x04 \x01(\tR\tbetDigest\x12 \n" +
-	"\voutcomeHash\x18\x05 \x01(\tR\voutcomeHash\x12&\n" +
-	"\x0etimeoutSeconds\x18\x06 \x01(\rR\x0etimeoutSeconds\"\xb4\x01\n" +
-	"\x14ReleasePrePayRequest\x12\x1c\n" +
-	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
-	"\aroundId\x18\x02 \x01(\tR\aroundId\x12$\n" +
-	"\rreservationId\x18\x03 \x01(\tR\rreservationId\x12\x1c\n" +
-	"\tbetDigest\x18\x04 \x01(\tR\tbetDigest\x12 \n" +
-	"\voutcomeHash\x18\x05 \x01(\tR\voutcomeHash\"\xb2\x01\n" +
+	" \x01(\tR\voutcomeHash\"\xb2\x01\n" +
 	"\x0eSettlementItem\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\"\n" +
 	"\fcurrencyType\x18\x02 \x01(\tR\fcurrencyType\x12\x1c\n" +
@@ -1455,12 +1280,10 @@ const file_lottery_proto_rawDesc = "" +
 	"\fsettlementId\x18\b \x01(\tR\fsettlementId\x12 \n" +
 	"\vtotalBetCny\x18\t \x01(\tR\vtotalBetCny\x12*\n" +
 	"\x10totalReservedCny\x18\n" +
-	" \x01(\tR\x10totalReservedCny2\xaf\x03\n" +
+	" \x01(\tR\x10totalReservedCny2\xa1\x02\n" +
 	"\x0eLotteryService\x120\n" +
 	"\x03Bet\x12\x13.lottery.BetRequest\x1a\x14.lottery.BetResponse\x129\n" +
-	"\x06PrePay\x12\x16.lottery.PrePayRequest\x1a\x17.lottery.PrePayResponse\x12C\n" +
-	"\vRenewPrePay\x12\x1b.lottery.RenewPrePayRequest\x1a\x17.lottery.PrePayResponse\x12G\n" +
-	"\rReleasePrePay\x12\x1d.lottery.ReleasePrePayRequest\x1a\x17.lottery.PrePayResponse\x12E\n" +
+	"\x06PrePay\x12\x16.lottery.PrePayRequest\x1a\x17.lottery.PrePayResponse\x12E\n" +
 	"\n" +
 	"Settlement\x12\x1a.lottery.SettlementRequest\x1a\x1b.lottery.SettlementResponse\x12[\n" +
 	"\x14GetRoundFinanceState\x12 .lottery.GetRoundFinanceStateReq\x1a!.lottery.GetRoundFinanceStateRespB\x15Z\x13./services;servicesb\x06proto3"
@@ -1477,7 +1300,7 @@ func file_lottery_proto_rawDescGZIP() []byte {
 	return file_lottery_proto_rawDescData
 }
 
-var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_lottery_proto_goTypes = []any{
 	(*BetItem)(nil),                  // 0: lottery.BetItem
 	(*BetRequest)(nil),               // 1: lottery.BetRequest
@@ -1486,42 +1309,36 @@ var file_lottery_proto_goTypes = []any{
 	(*PrePayItem)(nil),               // 4: lottery.PrePayItem
 	(*PrePayRequest)(nil),            // 5: lottery.PrePayRequest
 	(*PrePayResponse)(nil),           // 6: lottery.PrePayResponse
-	(*RenewPrePayRequest)(nil),       // 7: lottery.RenewPrePayRequest
-	(*ReleasePrePayRequest)(nil),     // 8: lottery.ReleasePrePayRequest
-	(*SettlementItem)(nil),           // 9: lottery.SettlementItem
-	(*SettlementRequest)(nil),        // 10: lottery.SettlementRequest
-	(*SettlementItemResult)(nil),     // 11: lottery.SettlementItemResult
-	(*SettlementResponse)(nil),       // 12: lottery.SettlementResponse
-	(*GetRoundFinanceStateReq)(nil),  // 13: lottery.GetRoundFinanceStateReq
-	(*GetRoundFinanceStateResp)(nil), // 14: lottery.GetRoundFinanceStateResp
-	(ErrorCode)(0),                   // 15: base.error_code
+	(*SettlementItem)(nil),           // 7: lottery.SettlementItem
+	(*SettlementRequest)(nil),        // 8: lottery.SettlementRequest
+	(*SettlementItemResult)(nil),     // 9: lottery.SettlementItemResult
+	(*SettlementResponse)(nil),       // 10: lottery.SettlementResponse
+	(*GetRoundFinanceStateReq)(nil),  // 11: lottery.GetRoundFinanceStateReq
+	(*GetRoundFinanceStateResp)(nil), // 12: lottery.GetRoundFinanceStateResp
+	(ErrorCode)(0),                   // 13: base.error_code
 }
 var file_lottery_proto_depIdxs = []int32{
 	0,  // 0: lottery.BetRequest.items:type_name -> lottery.BetItem
-	15, // 1: lottery.BetItemResult.code:type_name -> base.error_code
-	15, // 2: lottery.BetResponse.code:type_name -> base.error_code
+	13, // 1: lottery.BetItemResult.code:type_name -> base.error_code
+	13, // 2: lottery.BetResponse.code:type_name -> base.error_code
 	2,  // 3: lottery.BetResponse.items:type_name -> lottery.BetItemResult
 	4,  // 4: lottery.PrePayRequest.items:type_name -> lottery.PrePayItem
-	15, // 5: lottery.PrePayResponse.code:type_name -> base.error_code
-	9,  // 6: lottery.SettlementRequest.items:type_name -> lottery.SettlementItem
-	15, // 7: lottery.SettlementItemResult.code:type_name -> base.error_code
-	15, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
-	11, // 9: lottery.SettlementResponse.items:type_name -> lottery.SettlementItemResult
-	15, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
+	13, // 5: lottery.PrePayResponse.code:type_name -> base.error_code
+	7,  // 6: lottery.SettlementRequest.items:type_name -> lottery.SettlementItem
+	13, // 7: lottery.SettlementItemResult.code:type_name -> base.error_code
+	13, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
+	9,  // 9: lottery.SettlementResponse.items:type_name -> lottery.SettlementItemResult
+	13, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
 	1,  // 11: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
 	5,  // 12: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
-	7,  // 13: lottery.LotteryService.RenewPrePay:input_type -> lottery.RenewPrePayRequest
-	8,  // 14: lottery.LotteryService.ReleasePrePay:input_type -> lottery.ReleasePrePayRequest
-	10, // 15: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
-	13, // 16: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
-	3,  // 17: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
-	6,  // 18: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
-	6,  // 19: lottery.LotteryService.RenewPrePay:output_type -> lottery.PrePayResponse
-	6,  // 20: lottery.LotteryService.ReleasePrePay:output_type -> lottery.PrePayResponse
-	12, // 21: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
-	14, // 22: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
-	17, // [17:23] is the sub-list for method output_type
-	11, // [11:17] is the sub-list for method input_type
+	8,  // 13: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
+	11, // 14: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
+	3,  // 15: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
+	6,  // 16: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
+	10, // 17: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
+	12, // 18: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
+	15, // [15:19] is the sub-list for method output_type
+	11, // [11:15] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
 	11, // [11:11] is the sub-list for extension extendee
 	0,  // [0:11] is the sub-list for field type_name
@@ -1539,7 +1356,7 @@ func file_lottery_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lottery_proto_rawDesc), len(file_lottery_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
