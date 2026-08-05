@@ -4,6 +4,7 @@ import (
 	. "app/config"
 	"app/entity"
 	"context"
+	"errors"
 	"fmt"
 	"lottery/event"
 	"lottery/util"
@@ -22,6 +23,56 @@ import (
 )
 
 var redisDao *RedisDao = nil
+
+var (
+	// ErrPlayerNotCached 表示玩家完整资料尚未加载到 Redis。
+	ErrPlayerNotCached = errors.New("player is not cached")
+	// ErrInsufficientFunds 表示本次扣款会使玩家余额小于零。
+	ErrInsufficientFunds = errors.New("insufficient player funds")
+	// updateCurrencyScript 将存在性检查、余额非负校验、增减款和脏数据标记合并为一次原子操作。
+	updateCurrencyScript = redis.NewScript(`
+local playerKey = KEYS[1]
+if redis.call("HEXISTS", playerKey, "id") == 0 then
+    return {0, 0}
+end
+local current = tonumber(redis.call("HGET", playerKey, "currency") or "0")
+local updated = current + tonumber(ARGV[1])
+if updated < 0 then
+    return {1, current}
+end
+redis.call("HINCRBY", playerKey, "currency", ARGV[1])
+redis.call("HINCRBY", playerKey, "exp", ARGV[2])
+redis.call("EXPIRE", playerKey, ARGV[3])
+redis.call("SADD", KEYS[2], ARGV[4])
+return {2, updated}
+`)
+	// tryReservePoolScript 原子检查可用奖池并增加预留，避免并发预赔透支。
+	tryReservePoolScript = redis.NewScript(`
+local current = tonumber(redis.call("ZSCORE", KEYS[1], ARGV[1]) or "0")
+local basePool = tonumber(ARGV[2])
+local requested = tonumber(ARGV[3])
+if basePool - current < requested then
+    return 0
+end
+redis.call("ZINCRBY", KEYS[1], requested, ARGV[1])
+return 1
+`)
+	// releasePoolReservationScript 校验预留余额后再释放，防止重复释放影响其他牌局。
+	releasePoolReservationScript = redis.NewScript(`
+local current = tonumber(redis.call("ZSCORE", KEYS[1], ARGV[1]) or "0")
+local released = tonumber(ARGV[2])
+if current + 0.0000001 < released then
+    return 0
+end
+local updated = current - released
+if updated <= 0.0000001 then
+    redis.call("ZREM", KEYS[1], ARGV[1])
+else
+    redis.call("ZADD", KEYS[1], updated, ARGV[1])
+end
+return 1
+`)
+)
 
 type RedisDao struct {
 	cli redis.UniversalClient
@@ -56,8 +107,6 @@ func NewRedisDao(hosts []string, user, pwd string) {
 				Events: make(map[string]*event.Event),
 			}
 			e.Register("config", reflect.TypeOf(entity.ConfigMsg{}), ConfigHandler)
-			e.Register("addSingleCtrl", reflect.TypeOf(entity.AddPlayerSingleCtrl{}), AddPlayerSingleCtrlHandler)
-			e.Register("delSingleCtrl", reflect.TypeOf(entity.DelPlayerSingleCtrl{}), DelPlayerSingleCtrlHandler)
 			e.Register("addGame", reflect.TypeOf(entity.AddGame{}), AddGame)
 			e.Register("gameStatuChange", reflect.TypeOf(entity.GameStatuChange{}), GameStatusChange)
 			e.Register("addAgent", reflect.TypeOf(entity.AddAgent{}), AgentStatusChange)
@@ -72,18 +121,6 @@ func NewRedisDao(hosts []string, user, pwd string) {
 func ConfigHandler(data interface{}) {
 	msg := data.(*entity.ConfigMsg)
 	util.ParseConfig(msg.Key, msg.Data)
-}
-
-// 添加单控
-func AddPlayerSingleCtrlHandler(data interface{}) {
-	addCtrl := data.(*entity.AddPlayerSingleCtrl)
-	SCIns().addSingleCtrl(addCtrl.Uid, addCtrl.Rate, addCtrl.CtrlScore, SYSTEM_CTRL)
-}
-
-// 移除单控
-func DelPlayerSingleCtrlHandler(data interface{}) {
-	addCtrl := data.(*entity.DelPlayerSingleCtrl)
-	SCIns().delSingleCtrl(addCtrl.Uid)
 }
 
 func AddGame(data interface{}) {
@@ -214,46 +251,42 @@ func (rd *RedisDao) SetPlayer(p *services.HumanPlayer) error {
 	return err
 }
 
+// UpdatePlayerCurrency 以“分”为单位原子增减玩家余额，并保证并发扣款后余额不会小于零。
 func (rd *RedisDao) UpdatePlayerCurrency(playerId uint32, currencyDelta int64, exp, factory uint32, source int) (newCurrency int64, err error) {
 	pID := "player_" + strconv.FormatUint(uint64(playerId), 10)
-	pipe := rd.cli.Pipeline()
-	pipe.HExists(context.Background(), pID, "id").Result() // 完整的player信息是否存在
-	pipe.Expire(context.Background(), pID, time.Minute*20)
-	pipe.HGet(context.Background(), pID, "currency")
-	result, err := pipe.Exec(context.Background())
+	result, err := updateCurrencyScript.Run(
+		context.Background(),
+		rd.cli,
+		[]string{pID, "dirty_list_imp"},
+		currencyDelta,
+		exp,
+		int64((20*time.Minute)/time.Second),
+		playerId,
+	).Slice()
 	if err != nil {
 		return 0, err
 	}
-	rb := result[0].(*redis.BoolCmd)
-	exist, err := rb.Result()
-	if err == redis.Nil || (err == nil && !exist) {
-		return 0, redis.Nil
-	} else if err != nil {
-		return 0, err
+	if len(result) != 2 {
+		return 0, fmt.Errorf("unexpected currency script result")
 	}
-	cr := result[2].(*redis.StringCmd)
-	currentCurrency, err := cr.Int64()
-	if err != nil {
-		return 0, err
+	status, ok := result[0].(int64)
+	if !ok {
+		return 0, fmt.Errorf("unexpected currency script status")
 	}
-	if currentCurrency+currencyDelta < 0 {
-		newCurrency = currentCurrency
-		return 0, fmt.Errorf("玩家分数更新后不能小于0。玩家ID:%s,玩家在redis中的游戏币数量:%d,更新量：%d", pID, currentCurrency, currencyDelta)
+	value, ok := result[1].(int64)
+	if !ok {
+		return 0, fmt.Errorf("unexpected currency script balance")
 	}
-	pipe = rd.cli.Pipeline()
-	pipe.HIncrBy(context.Background(), pID, "currency", currencyDelta)
-	pipe.HIncrBy(context.Background(), pID, "exp", int64(exp))
-	pipe.SAdd(context.Background(), "dirty_list_imp", playerId)
-	result, err = pipe.Exec(context.Background())
-	if err != nil {
-		return 0, err
+	switch status {
+	case 0:
+		return 0, ErrPlayerNotCached
+	case 1:
+		return value, ErrInsufficientFunds
+	case 2:
+		return value, nil
+	default:
+		return 0, fmt.Errorf("unknown currency script status: %d", status)
 	}
-	crr := result[0].(*redis.IntCmd)
-	newCurrency, err = crr.Result()
-	if err != nil {
-		return 0, err
-	}
-	return newCurrency, nil
 }
 
 func (rd *RedisDao) GetPlayerCurrency(playerId uint32) (newCurrency int64, err error) {
@@ -303,6 +336,7 @@ func (rd *RedisDao) BatchGetPlayerCurrencys(ids []uint32) (map[uint32]int64, err
 }
 
 // 批量修改玩家金币信息，只有再玩家登录后才能使用该接口 且 返回金币是未换算的值
+// BatchUpdatePlayerCurrencys 批量发放已经完整校验过的结算金额，并返回每个玩家的新余额。
 func (rd *RedisDao) BatchUpdatePlayerCurrencys(deltas map[uint32]int64) (map[uint32]int64, error) {
 	currencys := make(map[uint32]int64)
 	pipe := rd.cli.Pipeline()
@@ -410,8 +444,60 @@ func (rd *RedisDao) GetGameStatData(id int64, symbol string) (decimal.Decimal, d
 	return decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, false
 }
 
+// GetAgentReserved 读取代理在指定奖池上的有效预留总额，金额单位为 CNY。
+func (rd *RedisDao) GetAgentReserved(agentID int64, symbol string) decimal.Decimal {
+	key := fmt.Sprintf("%d_%s", agentID, symbol)
+	value, err := rd.cli.ZScore(context.Background(), "agent_reserved_data", key).Result()
+	if err == redis.Nil {
+		return decimal.Zero
+	}
+	if err != nil {
+		zap.L().Error("读取奖池有效预留失败", zap.Int64("agentId", agentID), zap.String("symbol", symbol), zap.Error(err))
+		return decimal.Zero
+	}
+	return decimal.NewFromFloat(value)
+}
+
+// TryReserveAgentPool 原子判断基础奖池扣除现有预留后是否足够，并在足够时增加预留。
+func (rd *RedisDao) TryReserveAgentPool(agentID int64, symbol string, basePool, amount decimal.Decimal) (bool, error) {
+	key := fmt.Sprintf("%d_%s", agentID, symbol)
+	result, err := tryReservePoolScript.Run(
+		context.Background(),
+		rd.cli,
+		[]string{"agent_reserved_data"},
+		key,
+		basePool.String(),
+		amount.String(),
+	).Int64()
+	if err != nil {
+		return false, err
+	}
+	return result == 1, nil
+}
+
+// ReleaseAgentReserved 原子释放指定金额；当前预留不足时拒绝操作。
+func (rd *RedisDao) ReleaseAgentReserved(agentID int64, symbol string, amount decimal.Decimal) (bool, error) {
+	key := fmt.Sprintf("%d_%s", agentID, symbol)
+	result, err := releasePoolReservationScript.Run(
+		context.Background(),
+		rd.cli,
+		[]string{"agent_reserved_data"},
+		key,
+		amount.String(),
+	).Int64()
+	if err != nil {
+		return false, err
+	}
+	return result == 1, nil
+}
+
 func (rd *RedisDao) HGet(key, attrKey string) (string, error) {
 	return rd.cli.HGet(context.Background(), key, attrKey).Result()
+}
+
+// HGetAll 读取统一资金服务持久化的全部牌局快照。
+func (rd *RedisDao) HGetAll(key string) (map[string]string, error) {
+	return rd.cli.HGetAll(context.Background(), key).Result()
 }
 
 func (rd *RedisDao) Set(key, value string, timeout int32) error {
@@ -513,16 +599,6 @@ func LoadConfigs(client *RedisDao, prefix string) {
 			util.ParseConfig(tmpKey[p], cmd.Val())
 		}
 	}
-}
-
-type PoolValueItem struct {
-	EffValue decimal.Decimal
-	ProValue decimal.Decimal
-	Revenue  decimal.Decimal
-}
-
-func (pvi *PoolValueItem) GetValue(r decimal.Decimal) decimal.Decimal {
-	return pvi.ProValue.Neg().Sub(pvi.Revenue).Add(r)
 }
 
 // 初始化配置信息

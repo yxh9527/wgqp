@@ -56,11 +56,7 @@ func run(cmd *cobra.Command, args []string) error {
 	dao.InitGameManager()
 	dao.InitAgentManager()
 	//缓存初始化
-	dao.CahceInit()
-	//加载对局数据
-	dao.LoadAllRoundData()
-	//同步注单数据
-	dao.SyncRoundData()
+	dao.CacheInit()
 	handler := rpc.NewLotteryService(es)
 	rpcServer := rpc.NewServer(rc.ServerIp, rc.ServerPort, handler)
 	go rpcServer.Serve(dao.RedisIns(), dao.NewDBDao())

@@ -21,29 +21,37 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type PoolAmountResultReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       uint32                 `protobuf:"varint,1,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,4,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
+// 单笔下注。金额使用玩家币种的十进制字符串，最多保留两位小数。
+type BetItem struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 本局内唯一的下注编号，也是单笔下注的幂等键。
+	BetId string `protobuf:"bytes,1,opt,name=betId,proto3" json:"betId,omitempty"`
+	// 真人玩家编号。
+	UserId uint32 `protobuf:"varint,2,opt,name=userId,proto3" json:"userId,omitempty"`
+	// 玩家账户币种；奖池入账前会按汇率换算为 CNY。
+	CurrencyType string `protobuf:"bytes,3,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
+	// 实际扣除的玩家余额。
+	Amount string `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	// 可选的下注区域或玩法标识。
+	AreaId        string `protobuf:"bytes,5,opt,name=areaId,proto3" json:"areaId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PoolAmountResultReq) Reset() {
-	*x = PoolAmountResultReq{}
+func (x *BetItem) Reset() {
+	*x = BetItem{}
 	mi := &file_lottery_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PoolAmountResultReq) String() string {
+func (x *BetItem) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PoolAmountResultReq) ProtoMessage() {}
+func (*BetItem) ProtoMessage() {}
 
-func (x *PoolAmountResultReq) ProtoReflect() protoreflect.Message {
+func (x *BetItem) ProtoReflect() protoreflect.Message {
 	mi := &file_lottery_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -55,54 +63,79 @@ func (x *PoolAmountResultReq) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PoolAmountResultReq.ProtoReflect.Descriptor instead.
-func (*PoolAmountResultReq) Descriptor() ([]byte, []int) {
+// Deprecated: Use BetItem.ProtoReflect.Descriptor instead.
+func (*BetItem) Descriptor() ([]byte, []int) {
 	return file_lottery_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *PoolAmountResultReq) GetAgentId() uint32 {
+func (x *BetItem) GetBetId() string {
 	if x != nil {
-		return x.AgentId
+		return x.BetId
+	}
+	return ""
+}
+
+func (x *BetItem) GetUserId() uint32 {
+	if x != nil {
+		return x.UserId
 	}
 	return 0
 }
 
-func (x *PoolAmountResultReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *PoolAmountResultReq) GetCurrencyType() string {
+func (x *BetItem) GetCurrencyType() string {
 	if x != nil {
 		return x.CurrencyType
 	}
 	return ""
 }
 
-type PoolAmountResultResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
+func (x *BetItem) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *BetItem) GetAreaId() string {
+	if x != nil {
+		return x.AreaId
+	}
+	return ""
+}
+
+// 一次下注请求可以包含本局一个或多个真人玩家的下注。
+type BetRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 本次 RPC 请求编号，用于审计和问题追踪。
+	RequestId string `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	// 牌局唯一编号。
+	RoundId string `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	// 游戏编号。
+	GameId uint32 `protobuf:"varint,3,opt,name=gameId,proto3" json:"gameId,omitempty"`
+	// 代理编号。
+	Agent uint32 `protobuf:"varint,4,opt,name=agent,proto3" json:"agent,omitempty"`
+	// 房间等级；参与奖池二级键 agentId_symbol_level 的路由。
+	Level uint32 `protobuf:"varint,5,opt,name=level,proto3" json:"level,omitempty"`
+	// 本次提交的下注列表；批量请求按项返回结果，不回滚已成功项。
+	Items         []*BetItem `protobuf:"bytes,8,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PoolAmountResultResp) Reset() {
-	*x = PoolAmountResultResp{}
+func (x *BetRequest) Reset() {
+	*x = BetRequest{}
 	mi := &file_lottery_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PoolAmountResultResp) String() string {
+func (x *BetRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PoolAmountResultResp) ProtoMessage() {}
+func (*BetRequest) ProtoMessage() {}
 
-func (x *PoolAmountResultResp) ProtoReflect() protoreflect.Message {
+func (x *BetRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_lottery_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -114,47 +147,84 @@ func (x *PoolAmountResultResp) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PoolAmountResultResp.ProtoReflect.Descriptor instead.
-func (*PoolAmountResultResp) Descriptor() ([]byte, []int) {
+// Deprecated: Use BetRequest.ProtoReflect.Descriptor instead.
+func (*BetRequest) Descriptor() ([]byte, []int) {
 	return file_lottery_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *PoolAmountResultResp) GetCode() ErrorCode {
+func (x *BetRequest) GetRequestId() string {
 	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *PoolAmountResultResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
+		return x.RequestId
 	}
 	return ""
 }
 
-type QKLSettleMultiplayerReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Records       []*QKLRecord           `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
-	TotalWin      string                 `protobuf:"bytes,2,opt,name=totalWin,proto3" json:"totalWin,omitempty"`
+func (x *BetRequest) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *BetRequest) GetGameId() uint32 {
+	if x != nil {
+		return x.GameId
+	}
+	return 0
+}
+
+func (x *BetRequest) GetAgent() uint32 {
+	if x != nil {
+		return x.Agent
+	}
+	return 0
+}
+
+func (x *BetRequest) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *BetRequest) GetItems() []*BetItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// 单笔下注处理结果。
+type BetItemResult struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	BetId  string                 `protobuf:"bytes,1,opt,name=betId,proto3" json:"betId,omitempty"`
+	UserId uint32                 `protobuf:"varint,2,opt,name=userId,proto3" json:"userId,omitempty"`
+	// 该下注的业务错误码。
+	Code ErrorCode `protobuf:"varint,3,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	// true 表示已扣款并计入本局下注摘要。
+	Accepted bool `protobuf:"varint,4,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	// 扣款后的玩家余额。
+	Currency string `protobuf:"bytes,5,opt,name=currency,proto3" json:"currency,omitempty"`
+	// 失败原因说明，成功时为空。
+	Message       string `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *QKLSettleMultiplayerReq) Reset() {
-	*x = QKLSettleMultiplayerReq{}
+func (x *BetItemResult) Reset() {
+	*x = BetItemResult{}
 	mi := &file_lottery_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *QKLSettleMultiplayerReq) String() string {
+func (x *BetItemResult) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*QKLSettleMultiplayerReq) ProtoMessage() {}
+func (*BetItemResult) ProtoMessage() {}
 
-func (x *QKLSettleMultiplayerReq) ProtoReflect() protoreflect.Message {
+func (x *BetItemResult) ProtoReflect() protoreflect.Message {
 	mi := &file_lottery_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -166,47 +236,81 @@ func (x *QKLSettleMultiplayerReq) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use QKLSettleMultiplayerReq.ProtoReflect.Descriptor instead.
-func (*QKLSettleMultiplayerReq) Descriptor() ([]byte, []int) {
+// Deprecated: Use BetItemResult.ProtoReflect.Descriptor instead.
+func (*BetItemResult) Descriptor() ([]byte, []int) {
 	return file_lottery_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *QKLSettleMultiplayerReq) GetRecords() []*QKLRecord {
+func (x *BetItemResult) GetBetId() string {
 	if x != nil {
-		return x.Records
-	}
-	return nil
-}
-
-func (x *QKLSettleMultiplayerReq) GetTotalWin() string {
-	if x != nil {
-		return x.TotalWin
+		return x.BetId
 	}
 	return ""
 }
 
-type QKLNewCurrencyItem struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
+func (x *BetItemResult) GetUserId() uint32 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *BetItemResult) GetCode() ErrorCode {
+	if x != nil {
+		return x.Code
+	}
+	return ErrorCode_OK
+}
+
+func (x *BetItemResult) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *BetItemResult) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+func (x *BetItemResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// 下注响应。
+type BetResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Code    ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	RoundId string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	// 当前资金状态，下注阶段通常为 BETTING。
+	State string `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	// 本局全部已接受下注的 SHA-256 摘要。
+	BetDigest     string           `protobuf:"bytes,4,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	Items         []*BetItemResult `protobuf:"bytes,5,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *QKLNewCurrencyItem) Reset() {
-	*x = QKLNewCurrencyItem{}
+func (x *BetResponse) Reset() {
+	*x = BetResponse{}
 	mi := &file_lottery_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *QKLNewCurrencyItem) String() string {
+func (x *BetResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*QKLNewCurrencyItem) ProtoMessage() {}
+func (*BetResponse) ProtoMessage() {}
 
-func (x *QKLNewCurrencyItem) ProtoReflect() protoreflect.Message {
+func (x *BetResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_lottery_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -218,1944 +322,72 @@ func (x *QKLNewCurrencyItem) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use QKLNewCurrencyItem.ProtoReflect.Descriptor instead.
-func (*QKLNewCurrencyItem) Descriptor() ([]byte, []int) {
+// Deprecated: Use BetResponse.ProtoReflect.Descriptor instead.
+func (*BetResponse) Descriptor() ([]byte, []int) {
 	return file_lottery_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *QKLNewCurrencyItem) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLNewCurrencyItem) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLSettleMultiplayerResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currencys     []*QKLNewCurrencyItem  `protobuf:"bytes,2,rep,name=currencys,proto3" json:"currencys,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLSettleMultiplayerResp) Reset() {
-	*x = QKLSettleMultiplayerResp{}
-	mi := &file_lottery_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLSettleMultiplayerResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLSettleMultiplayerResp) ProtoMessage() {}
-
-func (x *QKLSettleMultiplayerResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLSettleMultiplayerResp.ProtoReflect.Descriptor instead.
-func (*QKLSettleMultiplayerResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *QKLSettleMultiplayerResp) GetCode() ErrorCode {
+func (x *BetResponse) GetCode() ErrorCode {
 	if x != nil {
 		return x.Code
 	}
 	return ErrorCode_OK
 }
 
-func (x *QKLSettleMultiplayerResp) GetCurrencys() []*QKLNewCurrencyItem {
+func (x *BetResponse) GetRoundId() string {
 	if x != nil {
-		return x.Currencys
-	}
-	return nil
-}
-
-type QKLRecord struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Win           string                 `protobuf:"bytes,3,opt,name=win,proto3" json:"win,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	Log           string                 `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
-	Bet           string                 `protobuf:"bytes,6,opt,name=bet,proto3" json:"bet,omitempty"`
-	PlayDate      int64                  `protobuf:"varint,7,opt,name=playDate,proto3" json:"playDate,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,9,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	Account       string                 `protobuf:"bytes,11,opt,name=account,proto3" json:"account,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLRecord) Reset() {
-	*x = QKLRecord{}
-	mi := &file_lottery_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLRecord) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLRecord) ProtoMessage() {}
-
-func (x *QKLRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLRecord.ProtoReflect.Descriptor instead.
-func (*QKLRecord) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *QKLRecord) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLRecord) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLRecord) GetWin() string {
-	if x != nil {
-		return x.Win
+		return x.RoundId
 	}
 	return ""
 }
 
-func (x *QKLRecord) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLRecord) GetLog() string {
-	if x != nil {
-		return x.Log
-	}
-	return ""
-}
-
-func (x *QKLRecord) GetBet() string {
-	if x != nil {
-		return x.Bet
-	}
-	return ""
-}
-
-func (x *QKLRecord) GetPlayDate() int64 {
-	if x != nil {
-		return x.PlayDate
-	}
-	return 0
-}
-
-func (x *QKLRecord) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-func (x *QKLRecord) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLRecord) GetAccount() string {
-	if x != nil {
-		return x.Account
-	}
-	return ""
-}
-
-type QKLSaveMultiplayerRecordsReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Records       []*QKLRecord           `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLSaveMultiplayerRecordsReq) Reset() {
-	*x = QKLSaveMultiplayerRecordsReq{}
-	mi := &file_lottery_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLSaveMultiplayerRecordsReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLSaveMultiplayerRecordsReq) ProtoMessage() {}
-
-func (x *QKLSaveMultiplayerRecordsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLSaveMultiplayerRecordsReq.ProtoReflect.Descriptor instead.
-func (*QKLSaveMultiplayerRecordsReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *QKLSaveMultiplayerRecordsReq) GetRecords() []*QKLRecord {
-	if x != nil {
-		return x.Records
-	}
-	return nil
-}
-
-type QKLSaveMultiplayerRecordsResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currencys     []*QKLNewCurrencyItem  `protobuf:"bytes,2,rep,name=currencys,proto3" json:"currencys,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLSaveMultiplayerRecordsResp) Reset() {
-	*x = QKLSaveMultiplayerRecordsResp{}
-	mi := &file_lottery_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLSaveMultiplayerRecordsResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLSaveMultiplayerRecordsResp) ProtoMessage() {}
-
-func (x *QKLSaveMultiplayerRecordsResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLSaveMultiplayerRecordsResp.ProtoReflect.Descriptor instead.
-func (*QKLSaveMultiplayerRecordsResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *QKLSaveMultiplayerRecordsResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLSaveMultiplayerRecordsResp) GetCurrencys() []*QKLNewCurrencyItem {
-	if x != nil {
-		return x.Currencys
-	}
-	return nil
-}
-
-type QKLDoMultiplayerCashoutReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Win           string                 `protobuf:"bytes,3,opt,name=win,proto3" json:"win,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	Complete      bool                   `protobuf:"varint,8,opt,name=complete,proto3" json:"complete,omitempty"` //区块链 只要是结算 默认是true
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoMultiplayerCashoutReq) Reset() {
-	*x = QKLDoMultiplayerCashoutReq{}
-	mi := &file_lottery_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoMultiplayerCashoutReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoMultiplayerCashoutReq) ProtoMessage() {}
-
-func (x *QKLDoMultiplayerCashoutReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoMultiplayerCashoutReq.ProtoReflect.Descriptor instead.
-func (*QKLDoMultiplayerCashoutReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *QKLDoMultiplayerCashoutReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoMultiplayerCashoutReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoMultiplayerCashoutReq) GetWin() string {
-	if x != nil {
-		return x.Win
-	}
-	return ""
-}
-
-func (x *QKLDoMultiplayerCashoutReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoMultiplayerCashoutReq) GetComplete() bool {
-	if x != nil {
-		return x.Complete
-	}
-	return false
-}
-
-func (x *QKLDoMultiplayerCashoutReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoMultiplayerCashoutReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoMultiplayerCashoutResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoMultiplayerCashoutResp) Reset() {
-	*x = QKLDoMultiplayerCashoutResp{}
-	mi := &file_lottery_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoMultiplayerCashoutResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoMultiplayerCashoutResp) ProtoMessage() {}
-
-func (x *QKLDoMultiplayerCashoutResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoMultiplayerCashoutResp.ProtoReflect.Descriptor instead.
-func (*QKLDoMultiplayerCashoutResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *QKLDoMultiplayerCashoutResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoMultiplayerCashoutResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLCancelBetMultiplayerGameReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Bet           string                 `protobuf:"bytes,3,opt,name=bet,proto3" json:"bet,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	AreaId        uint32                 `protobuf:"varint,5,opt,name=areaId,proto3" json:"areaId,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) Reset() {
-	*x = QKLCancelBetMultiplayerGameReq{}
-	mi := &file_lottery_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLCancelBetMultiplayerGameReq) ProtoMessage() {}
-
-func (x *QKLCancelBetMultiplayerGameReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLCancelBetMultiplayerGameReq.ProtoReflect.Descriptor instead.
-func (*QKLCancelBetMultiplayerGameReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) GetBet() string {
-	if x != nil {
-		return x.Bet
-	}
-	return ""
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) GetAreaId() uint32 {
-	if x != nil {
-		return x.AreaId
-	}
-	return 0
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLCancelBetMultiplayerGameReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLCancelBetMultiplayerGameResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLCancelBetMultiplayerGameResp) Reset() {
-	*x = QKLCancelBetMultiplayerGameResp{}
-	mi := &file_lottery_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLCancelBetMultiplayerGameResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLCancelBetMultiplayerGameResp) ProtoMessage() {}
-
-func (x *QKLCancelBetMultiplayerGameResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLCancelBetMultiplayerGameResp.ProtoReflect.Descriptor instead.
-func (*QKLCancelBetMultiplayerGameResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *QKLCancelBetMultiplayerGameResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLCancelBetMultiplayerGameResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLDoBetMultiplayerGameReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	AreaId        uint32                 `protobuf:"varint,5,opt,name=areaId,proto3" json:"areaId,omitempty"`
-	InitBet       string                 `protobuf:"bytes,9,opt,name=initBet,proto3" json:"initBet,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetMultiplayerGameReq) Reset() {
-	*x = QKLDoBetMultiplayerGameReq{}
-	mi := &file_lottery_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetMultiplayerGameReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetMultiplayerGameReq) ProtoMessage() {}
-
-func (x *QKLDoBetMultiplayerGameReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetMultiplayerGameReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetMultiplayerGameReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *QKLDoBetMultiplayerGameReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetMultiplayerGameReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetMultiplayerGameReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetMultiplayerGameReq) GetAreaId() uint32 {
-	if x != nil {
-		return x.AreaId
-	}
-	return 0
-}
-
-func (x *QKLDoBetMultiplayerGameReq) GetInitBet() string {
-	if x != nil {
-		return x.InitBet
-	}
-	return ""
-}
-
-func (x *QKLDoBetMultiplayerGameReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetMultiplayerGameReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoBetMultiplayerGameResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetMultiplayerGameResp) Reset() {
-	*x = QKLDoBetMultiplayerGameResp{}
-	mi := &file_lottery_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetMultiplayerGameResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetMultiplayerGameResp) ProtoMessage() {}
-
-func (x *QKLDoBetMultiplayerGameResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetMultiplayerGameResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetMultiplayerGameResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *QKLDoBetMultiplayerGameResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetMultiplayerGameResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLDoBetReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Win           string                 `protobuf:"bytes,3,opt,name=win,proto3" json:"win,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	Result        string                 `protobuf:"bytes,7,opt,name=result,proto3" json:"result,omitempty"`
-	Complete      bool                   `protobuf:"varint,8,opt,name=complete,proto3" json:"complete,omitempty"` //区块链 只要是结算 默认是true
-	Bet           string                 `protobuf:"bytes,10,opt,name=bet,proto3" json:"bet,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,11,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,12,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetReq) Reset() {
-	*x = QKLDoBetReq{}
-	mi := &file_lottery_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetReq) ProtoMessage() {}
-
-func (x *QKLDoBetReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *QKLDoBetReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetReq) GetWin() string {
-	if x != nil {
-		return x.Win
-	}
-	return ""
-}
-
-func (x *QKLDoBetReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetReq) GetResult() string {
-	if x != nil {
-		return x.Result
-	}
-	return ""
-}
-
-func (x *QKLDoBetReq) GetComplete() bool {
-	if x != nil {
-		return x.Complete
-	}
-	return false
-}
-
-func (x *QKLDoBetReq) GetBet() string {
-	if x != nil {
-		return x.Bet
-	}
-	return ""
-}
-
-func (x *QKLDoBetReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoBetResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetResp) Reset() {
-	*x = QKLDoBetResp{}
-	mi := &file_lottery_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetResp) ProtoMessage() {}
-
-func (x *QKLDoBetResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *QKLDoBetResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLDoBetStopReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	InitBet       string                 `protobuf:"bytes,9,opt,name=initBet,proto3" json:"initBet,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetStopReq) Reset() {
-	*x = QKLDoBetStopReq{}
-	mi := &file_lottery_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetStopReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetStopReq) ProtoMessage() {}
-
-func (x *QKLDoBetStopReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetStopReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetStopReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *QKLDoBetStopReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetStopReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetStopReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetStopReq) GetInitBet() string {
-	if x != nil {
-		return x.InitBet
-	}
-	return ""
-}
-
-func (x *QKLDoBetStopReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetStopReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoBetStopResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetStopResp) Reset() {
-	*x = QKLDoBetStopResp{}
-	mi := &file_lottery_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetStopResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetStopResp) ProtoMessage() {}
-
-func (x *QKLDoBetStopResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetStopResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetStopResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *QKLDoBetStopResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetStopResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLDoBetSettleWithCheckReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Win           string                 `protobuf:"bytes,3,opt,name=win,proto3" json:"win,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	Hit           string                 `protobuf:"bytes,6,opt,name=hit,proto3" json:"hit,omitempty"`
-	Result        string                 `protobuf:"bytes,7,opt,name=result,proto3" json:"result,omitempty"`
-	Complete      bool                   `protobuf:"varint,8,opt,name=complete,proto3" json:"complete,omitempty"` //区块链 只要是结算 默认是true
-	InitBet       string                 `protobuf:"bytes,9,opt,name=initBet,proto3" json:"initBet,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetSettleWithCheckReq) Reset() {
-	*x = QKLDoBetSettleWithCheckReq{}
-	mi := &file_lottery_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetSettleWithCheckReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetSettleWithCheckReq) ProtoMessage() {}
-
-func (x *QKLDoBetSettleWithCheckReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetSettleWithCheckReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetSettleWithCheckReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetWin() string {
-	if x != nil {
-		return x.Win
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetHit() string {
-	if x != nil {
-		return x.Hit
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetResult() string {
-	if x != nil {
-		return x.Result
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetComplete() bool {
-	if x != nil {
-		return x.Complete
-	}
-	return false
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetInitBet() string {
-	if x != nil {
-		return x.InitBet
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetSettleWithCheckReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoBetSettleWithCheckResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	CanAfford     bool                   `protobuf:"varint,3,opt,name=canAfford,proto3" json:"canAfford,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetSettleWithCheckResp) Reset() {
-	*x = QKLDoBetSettleWithCheckResp{}
-	mi := &file_lottery_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetSettleWithCheckResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetSettleWithCheckResp) ProtoMessage() {}
-
-func (x *QKLDoBetSettleWithCheckResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetSettleWithCheckResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetSettleWithCheckResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *QKLDoBetSettleWithCheckResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetSettleWithCheckResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleWithCheckResp) GetCanAfford() bool {
-	if x != nil {
-		return x.CanAfford
-	}
-	return false
-}
-
-type QKLDoBetSettleReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Win           string                 `protobuf:"bytes,3,opt,name=win,proto3" json:"win,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	Hit           bool                   `protobuf:"varint,6,opt,name=hit,proto3" json:"hit,omitempty"`
-	Result        string                 `protobuf:"bytes,7,opt,name=result,proto3" json:"result,omitempty"`
-	TotalBet      string                 `protobuf:"bytes,8,opt,name=totalBet,proto3" json:"totalBet,omitempty"`
-	Complete      bool                   `protobuf:"varint,9,opt,name=complete,proto3" json:"complete,omitempty"` //区块链 只要是结算 默认是true
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	GuaranteedWin bool                   `protobuf:"varint,12,opt,name=guaranteedWin,proto3" json:"guaranteedWin,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetSettleReq) Reset() {
-	*x = QKLDoBetSettleReq{}
-	mi := &file_lottery_proto_msgTypes[20]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetSettleReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetSettleReq) ProtoMessage() {}
-
-func (x *QKLDoBetSettleReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[20]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetSettleReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetSettleReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *QKLDoBetSettleReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetSettleReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetSettleReq) GetWin() string {
-	if x != nil {
-		return x.Win
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleReq) GetHit() bool {
-	if x != nil {
-		return x.Hit
-	}
-	return false
-}
-
-func (x *QKLDoBetSettleReq) GetResult() string {
-	if x != nil {
-		return x.Result
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleReq) GetTotalBet() string {
-	if x != nil {
-		return x.TotalBet
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleReq) GetComplete() bool {
-	if x != nil {
-		return x.Complete
-	}
-	return false
-}
-
-func (x *QKLDoBetSettleReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetSettleReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-func (x *QKLDoBetSettleReq) GetGuaranteedWin() bool {
-	if x != nil {
-		return x.GuaranteedWin
-	}
-	return false
-}
-
-type QKLDoBetSettleResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetSettleResp) Reset() {
-	*x = QKLDoBetSettleResp{}
-	mi := &file_lottery_proto_msgTypes[21]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetSettleResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetSettleResp) ProtoMessage() {}
-
-func (x *QKLDoBetSettleResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[21]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetSettleResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetSettleResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *QKLDoBetSettleResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetSettleResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLDoBetMoreReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Bet           string                 `protobuf:"bytes,3,opt,name=bet,proto3" json:"bet,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetMoreReq) Reset() {
-	*x = QKLDoBetMoreReq{}
-	mi := &file_lottery_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetMoreReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetMoreReq) ProtoMessage() {}
-
-func (x *QKLDoBetMoreReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetMoreReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetMoreReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *QKLDoBetMoreReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetMoreReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetMoreReq) GetBet() string {
-	if x != nil {
-		return x.Bet
-	}
-	return ""
-}
-
-func (x *QKLDoBetMoreReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetMoreReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetMoreReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoBetMoreResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetMoreResp) Reset() {
-	*x = QKLDoBetMoreResp{}
-	mi := &file_lottery_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetMoreResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetMoreResp) ProtoMessage() {}
-
-func (x *QKLDoBetMoreResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetMoreResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetMoreResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *QKLDoBetMoreResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetMoreResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type QKLDoBetContinueReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	GuaranteedWin bool                   `protobuf:"varint,6,opt,name=guaranteedWin,proto3" json:"guaranteedWin,omitempty"`
-	DeltaWin      string                 `protobuf:"bytes,7,opt,name=deltaWin,proto3" json:"deltaWin,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetContinueReq) Reset() {
-	*x = QKLDoBetContinueReq{}
-	mi := &file_lottery_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetContinueReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetContinueReq) ProtoMessage() {}
-
-func (x *QKLDoBetContinueReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetContinueReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetContinueReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *QKLDoBetContinueReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetContinueReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetContinueReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetContinueReq) GetGuaranteedWin() bool {
-	if x != nil {
-		return x.GuaranteedWin
-	}
-	return false
-}
-
-func (x *QKLDoBetContinueReq) GetDeltaWin() string {
-	if x != nil {
-		return x.DeltaWin
-	}
-	return ""
-}
-
-func (x *QKLDoBetContinueReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetContinueReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoBetContinueResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	CanAfford     bool                   `protobuf:"varint,2,opt,name=canAfford,proto3" json:"canAfford,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetContinueResp) Reset() {
-	*x = QKLDoBetContinueResp{}
-	mi := &file_lottery_proto_msgTypes[25]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetContinueResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetContinueResp) ProtoMessage() {}
-
-func (x *QKLDoBetContinueResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[25]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetContinueResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetContinueResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{25}
-}
-
-func (x *QKLDoBetContinueResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetContinueResp) GetCanAfford() bool {
-	if x != nil {
-		return x.CanAfford
-	}
-	return false
-}
-
-type QKLDoBetInitReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,2,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	Bet           string                 `protobuf:"bytes,3,opt,name=bet,proto3" json:"bet,omitempty"`
-	RoundID       string                 `protobuf:"bytes,4,opt,name=roundID,proto3" json:"roundID,omitempty"`
-	AgentId       uint32                 `protobuf:"varint,10,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,11,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetInitReq) Reset() {
-	*x = QKLDoBetInitReq{}
-	mi := &file_lottery_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetInitReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetInitReq) ProtoMessage() {}
-
-func (x *QKLDoBetInitReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetInitReq.ProtoReflect.Descriptor instead.
-func (*QKLDoBetInitReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *QKLDoBetInitReq) GetUserId() uint32 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *QKLDoBetInitReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *QKLDoBetInitReq) GetBet() string {
-	if x != nil {
-		return x.Bet
-	}
-	return ""
-}
-
-func (x *QKLDoBetInitReq) GetRoundID() string {
-	if x != nil {
-		return x.RoundID
-	}
-	return ""
-}
-
-func (x *QKLDoBetInitReq) GetAgentId() uint32 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *QKLDoBetInitReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-type QKLDoBetInitResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
-	Currency      string                 `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *QKLDoBetInitResp) Reset() {
-	*x = QKLDoBetInitResp{}
-	mi := &file_lottery_proto_msgTypes[27]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *QKLDoBetInitResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*QKLDoBetInitResp) ProtoMessage() {}
-
-func (x *QKLDoBetInitResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[27]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use QKLDoBetInitResp.ProtoReflect.Descriptor instead.
-func (*QKLDoBetInitResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{27}
-}
-
-func (x *QKLDoBetInitResp) GetCode() ErrorCode {
-	if x != nil {
-		return x.Code
-	}
-	return ErrorCode_OK
-}
-
-func (x *QKLDoBetInitResp) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-type SlotsLotteryReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PlayerId      uint32                 `protobuf:"varint,1,opt,name=playerId,proto3" json:"playerId,omitempty"`
-	CurrencyType  string                 `protobuf:"bytes,5,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
-	AgentId       int64                  `protobuf:"varint,6,opt,name=agentId,proto3" json:"agentId,omitempty"`
-	GameId        uint32                 `protobuf:"varint,7,opt,name=gameId,proto3" json:"gameId,omitempty"`
-	ProfitLoss    string                 `protobuf:"bytes,8,opt,name=profitLoss,proto3" json:"profitLoss,omitempty"`        //开奖
-	Bet           string                 `protobuf:"bytes,9,opt,name=bet,proto3" json:"bet,omitempty"`                      //下注
-	State         string                 `protobuf:"bytes,10,opt,name=state,proto3" json:"state,omitempty"`                 //状态
-	Token         string                 `protobuf:"bytes,11,opt,name=token,proto3" json:"token,omitempty"`                 //token
-	RoundID       string                 `protobuf:"bytes,12,opt,name=roundID,proto3" json:"roundID,omitempty"`             //局号 --下注时使用
-	MaxProfitLoss string                 `protobuf:"bytes,13,opt,name=maxProfitLoss,proto3" json:"maxProfitLoss,omitempty"` //最大赔付
-	Complete      bool                   `protobuf:"varint,14,opt,name=complete,proto3" json:"complete,omitempty"`          //注单是否结束
-	Account       string                 `protobuf:"bytes,15,opt,name=account,proto3" json:"account,omitempty"`             //三方平台账号
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SlotsLotteryReq) Reset() {
-	*x = SlotsLotteryReq{}
-	mi := &file_lottery_proto_msgTypes[28]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SlotsLotteryReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SlotsLotteryReq) ProtoMessage() {}
-
-func (x *SlotsLotteryReq) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[28]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SlotsLotteryReq.ProtoReflect.Descriptor instead.
-func (*SlotsLotteryReq) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{28}
-}
-
-func (x *SlotsLotteryReq) GetPlayerId() uint32 {
-	if x != nil {
-		return x.PlayerId
-	}
-	return 0
-}
-
-func (x *SlotsLotteryReq) GetCurrencyType() string {
-	if x != nil {
-		return x.CurrencyType
-	}
-	return ""
-}
-
-func (x *SlotsLotteryReq) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *SlotsLotteryReq) GetGameId() uint32 {
-	if x != nil {
-		return x.GameId
-	}
-	return 0
-}
-
-func (x *SlotsLotteryReq) GetProfitLoss() string {
-	if x != nil {
-		return x.ProfitLoss
-	}
-	return ""
-}
-
-func (x *SlotsLotteryReq) GetBet() string {
-	if x != nil {
-		return x.Bet
-	}
-	return ""
-}
-
-func (x *SlotsLotteryReq) GetState() string {
+func (x *BetResponse) GetState() string {
 	if x != nil {
 		return x.State
 	}
 	return ""
 }
 
-func (x *SlotsLotteryReq) GetToken() string {
+func (x *BetResponse) GetBetDigest() string {
 	if x != nil {
-		return x.Token
+		return x.BetDigest
 	}
 	return ""
 }
 
-func (x *SlotsLotteryReq) GetRoundID() string {
+func (x *BetResponse) GetItems() []*BetItemResult {
 	if x != nil {
-		return x.RoundID
+		return x.Items
 	}
-	return ""
+	return nil
 }
 
-func (x *SlotsLotteryReq) GetMaxProfitLoss() string {
-	if x != nil {
-		return x.MaxProfitLoss
-	}
-	return ""
-}
-
-func (x *SlotsLotteryReq) GetComplete() bool {
-	if x != nil {
-		return x.Complete
-	}
-	return false
-}
-
-func (x *SlotsLotteryReq) GetAccount() string {
-	if x != nil {
-		return x.Account
-	}
-	return ""
-}
-
-type SlotsLotteryResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// 玩家最新的金币数
-	NewCurrency string `protobuf:"bytes,1,opt,name=newCurrency,proto3" json:"newCurrency,omitempty"`
-	Result      bool   `protobuf:"varint,2,opt,name=result,proto3" json:"result,omitempty"`
-	// 当前可赔付值
-	Pay           string    `protobuf:"bytes,3,opt,name=pay,proto3" json:"pay,omitempty"`
-	Code          ErrorCode `protobuf:"varint,4,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+// 单个真人玩家的候选赔付。
+type PrePayItem struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	UserId       uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	CurrencyType string                 `protobuf:"bytes,2,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
+	// 实际返还玩家的总金额，不是净利润。
+	Payout        string `protobuf:"bytes,3,opt,name=payout,proto3" json:"payout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SlotsLotteryResp) Reset() {
-	*x = SlotsLotteryResp{}
-	mi := &file_lottery_proto_msgTypes[29]
+func (x *PrePayItem) Reset() {
+	*x = PrePayItem{}
+	mi := &file_lottery_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SlotsLotteryResp) String() string {
+func (x *PrePayItem) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SlotsLotteryResp) ProtoMessage() {}
+func (*PrePayItem) ProtoMessage() {}
 
-func (x *SlotsLotteryResp) ProtoReflect() protoreflect.Message {
-	mi := &file_lottery_proto_msgTypes[29]
+func (x *PrePayItem) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2166,37 +398,945 @@ func (x *SlotsLotteryResp) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SlotsLotteryResp.ProtoReflect.Descriptor instead.
-func (*SlotsLotteryResp) Descriptor() ([]byte, []int) {
-	return file_lottery_proto_rawDescGZIP(), []int{29}
+// Deprecated: Use PrePayItem.ProtoReflect.Descriptor instead.
+func (*PrePayItem) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *SlotsLotteryResp) GetNewCurrency() string {
+func (x *PrePayItem) GetUserId() uint32 {
 	if x != nil {
-		return x.NewCurrency
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *PrePayItem) GetCurrencyType() string {
+	if x != nil {
+		return x.CurrencyType
 	}
 	return ""
 }
 
-func (x *SlotsLotteryResp) GetResult() bool {
+func (x *PrePayItem) GetPayout() string {
 	if x != nil {
-		return x.Result
-	}
-	return false
-}
-
-func (x *SlotsLotteryResp) GetPay() string {
-	if x != nil {
-		return x.Pay
+		return x.Payout
 	}
 	return ""
 }
 
-func (x *SlotsLotteryResp) GetCode() ErrorCode {
+// 赔付预留请求，必须覆盖本局全部有效真人玩家。
+type PrePayRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	RoundId   string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	GameId    uint32                 `protobuf:"varint,3,opt,name=gameId,proto3" json:"gameId,omitempty"`
+	Agent     uint32                 `protobuf:"varint,4,opt,name=agent,proto3" json:"agent,omitempty"`
+	Level     uint32                 `protobuf:"varint,5,opt,name=level,proto3" json:"level,omitempty"`
+	// 必须与资金服务按已接受下注计算出的摘要完全一致。
+	BetDigest string `protobuf:"bytes,6,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	// 完整候选游戏结果的摘要。
+	OutcomeHash string `protobuf:"bytes,7,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
+	// 预留有效秒数；传 0 使用服务默认值。
+	TimeoutSeconds uint32        `protobuf:"varint,8,opt,name=timeoutSeconds,proto3" json:"timeoutSeconds,omitempty"`
+	Items          []*PrePayItem `protobuf:"bytes,9,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PrePayRequest) Reset() {
+	*x = PrePayRequest{}
+	mi := &file_lottery_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrePayRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrePayRequest) ProtoMessage() {}
+
+func (x *PrePayRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrePayRequest.ProtoReflect.Descriptor instead.
+func (*PrePayRequest) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *PrePayRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *PrePayRequest) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *PrePayRequest) GetGameId() uint32 {
+	if x != nil {
+		return x.GameId
+	}
+	return 0
+}
+
+func (x *PrePayRequest) GetAgent() uint32 {
+	if x != nil {
+		return x.Agent
+	}
+	return 0
+}
+
+func (x *PrePayRequest) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *PrePayRequest) GetBetDigest() string {
+	if x != nil {
+		return x.BetDigest
+	}
+	return ""
+}
+
+func (x *PrePayRequest) GetOutcomeHash() string {
+	if x != nil {
+		return x.OutcomeHash
+	}
+	return ""
+}
+
+func (x *PrePayRequest) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+func (x *PrePayRequest) GetItems() []*PrePayItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// 预留、续租和释放共用的响应结构。
+type PrePayResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Code  ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	// true 表示本次预留生命周期操作成功。
+	Success bool   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	RoundId string `protobuf:"bytes,3,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	State   string `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
+	// 本次预留的唯一编号。
+	ReservationId string `protobuf:"bytes,5,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
+	// 按汇率换算后的 CNY 预留总额。
+	TotalPayoutCny string `protobuf:"bytes,6,opt,name=totalPayoutCny,proto3" json:"totalPayoutCny,omitempty"`
+	// Unix 秒级过期时间。
+	ExpiresAt int64 `protobuf:"varint,7,opt,name=expiresAt,proto3" json:"expiresAt,omitempty"`
+	// INVALID_REQUEST、BET_MISMATCH、ROUND_CONFLICT 或 INSUFFICIENT_POOL。
+	Reason        string `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
+	BetDigest     string `protobuf:"bytes,9,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	OutcomeHash   string `protobuf:"bytes,10,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PrePayResponse) Reset() {
+	*x = PrePayResponse{}
+	mi := &file_lottery_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrePayResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrePayResponse) ProtoMessage() {}
+
+func (x *PrePayResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrePayResponse.ProtoReflect.Descriptor instead.
+func (*PrePayResponse) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PrePayResponse) GetCode() ErrorCode {
 	if x != nil {
 		return x.Code
 	}
 	return ErrorCode_OK
+}
+
+func (x *PrePayResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *PrePayResponse) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *PrePayResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *PrePayResponse) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *PrePayResponse) GetTotalPayoutCny() string {
+	if x != nil {
+		return x.TotalPayoutCny
+	}
+	return ""
+}
+
+func (x *PrePayResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *PrePayResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *PrePayResponse) GetBetDigest() string {
+	if x != nil {
+		return x.BetDigest
+	}
+	return ""
+}
+
+func (x *PrePayResponse) GetOutcomeHash() string {
+	if x != nil {
+		return x.OutcomeHash
+	}
+	return ""
+}
+
+// 预留续租请求；同一 requestId 重试不会重复延长有效期。
+type RenewPrePayRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	RoundId        string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	ReservationId  string                 `protobuf:"bytes,3,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
+	BetDigest      string                 `protobuf:"bytes,4,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	OutcomeHash    string                 `protobuf:"bytes,5,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
+	TimeoutSeconds uint32                 `protobuf:"varint,6,opt,name=timeoutSeconds,proto3" json:"timeoutSeconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RenewPrePayRequest) Reset() {
+	*x = RenewPrePayRequest{}
+	mi := &file_lottery_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RenewPrePayRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RenewPrePayRequest) ProtoMessage() {}
+
+func (x *RenewPrePayRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RenewPrePayRequest.ProtoReflect.Descriptor instead.
+func (*RenewPrePayRequest) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RenewPrePayRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RenewPrePayRequest) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *RenewPrePayRequest) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *RenewPrePayRequest) GetBetDigest() string {
+	if x != nil {
+		return x.BetDigest
+	}
+	return ""
+}
+
+func (x *RenewPrePayRequest) GetOutcomeHash() string {
+	if x != nil {
+		return x.OutcomeHash
+	}
+	return ""
+}
+
+func (x *RenewPrePayRequest) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+// 主动释放预留请求，必须携带完整预留凭证。
+type ReleasePrePayRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	RoundId       string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	ReservationId string                 `protobuf:"bytes,3,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
+	BetDigest     string                 `protobuf:"bytes,4,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	OutcomeHash   string                 `protobuf:"bytes,5,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleasePrePayRequest) Reset() {
+	*x = ReleasePrePayRequest{}
+	mi := &file_lottery_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleasePrePayRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleasePrePayRequest) ProtoMessage() {}
+
+func (x *ReleasePrePayRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleasePrePayRequest.ProtoReflect.Descriptor instead.
+func (*ReleasePrePayRequest) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ReleasePrePayRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ReleasePrePayRequest) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *ReleasePrePayRequest) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *ReleasePrePayRequest) GetBetDigest() string {
+	if x != nil {
+		return x.BetDigest
+	}
+	return ""
+}
+
+func (x *ReleasePrePayRequest) GetOutcomeHash() string {
+	if x != nil {
+		return x.OutcomeHash
+	}
+	return ""
+}
+
+// 单个真人玩家的结算数据。
+type SettlementItem struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	UserId       uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	CurrencyType string                 `protobuf:"bytes,2,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
+	// 本局该玩家全部已接受下注的汇总金额。
+	BetAmount string `protobuf:"bytes,3,opt,name=betAmount,proto3" json:"betAmount,omitempty"`
+	// 实际返还玩家账户的金额；玩家输时也必须提交 0。
+	Payout string `protobuf:"bytes,4,opt,name=payout,proto3" json:"payout,omitempty"`
+	// 玩家净利润，必须等于 payout - betAmount，允许为负数。
+	Profit string `protobuf:"bytes,5,opt,name=profit,proto3" json:"profit,omitempty"`
+	// 游戏侧提供的完整注单详情。
+	Record        string `protobuf:"bytes,6,opt,name=record,proto3" json:"record,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SettlementItem) Reset() {
+	*x = SettlementItem{}
+	mi := &file_lottery_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettlementItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettlementItem) ProtoMessage() {}
+
+func (x *SettlementItem) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettlementItem.ProtoReflect.Descriptor instead.
+func (*SettlementItem) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SettlementItem) GetUserId() uint32 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *SettlementItem) GetCurrencyType() string {
+	if x != nil {
+		return x.CurrencyType
+	}
+	return ""
+}
+
+func (x *SettlementItem) GetBetAmount() string {
+	if x != nil {
+		return x.BetAmount
+	}
+	return ""
+}
+
+func (x *SettlementItem) GetPayout() string {
+	if x != nil {
+		return x.Payout
+	}
+	return ""
+}
+
+func (x *SettlementItem) GetProfit() string {
+	if x != nil {
+		return x.Profit
+	}
+	return ""
+}
+
+func (x *SettlementItem) GetRecord() string {
+	if x != nil {
+		return x.Record
+	}
+	return ""
+}
+
+// 批量结算请求，必须覆盖本局全部有效真人玩家且不能重复。
+type SettlementRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 全局唯一结算编号，也是结算幂等键。
+	SettlementId  string `protobuf:"bytes,1,opt,name=settlementId,proto3" json:"settlementId,omitempty"`
+	RoundId       string `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	GameId        uint32 `protobuf:"varint,3,opt,name=gameId,proto3" json:"gameId,omitempty"`
+	Agent         uint32 `protobuf:"varint,4,opt,name=agent,proto3" json:"agent,omitempty"`
+	Level         uint32 `protobuf:"varint,5,opt,name=level,proto3" json:"level,omitempty"`
+	ReservationId string `protobuf:"bytes,6,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
+	BetDigest     string `protobuf:"bytes,7,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	OutcomeHash   string `protobuf:"bytes,8,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
+	// NORMAL 为正常赔付，VOID_REFUND 为全额退回下注并关闭本局。
+	Mode          string            `protobuf:"bytes,9,opt,name=mode,proto3" json:"mode,omitempty"`
+	Items         []*SettlementItem `protobuf:"bytes,10,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SettlementRequest) Reset() {
+	*x = SettlementRequest{}
+	mi := &file_lottery_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettlementRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettlementRequest) ProtoMessage() {}
+
+func (x *SettlementRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettlementRequest.ProtoReflect.Descriptor instead.
+func (*SettlementRequest) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SettlementRequest) GetSettlementId() string {
+	if x != nil {
+		return x.SettlementId
+	}
+	return ""
+}
+
+func (x *SettlementRequest) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *SettlementRequest) GetGameId() uint32 {
+	if x != nil {
+		return x.GameId
+	}
+	return 0
+}
+
+func (x *SettlementRequest) GetAgent() uint32 {
+	if x != nil {
+		return x.Agent
+	}
+	return 0
+}
+
+func (x *SettlementRequest) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *SettlementRequest) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *SettlementRequest) GetBetDigest() string {
+	if x != nil {
+		return x.BetDigest
+	}
+	return ""
+}
+
+func (x *SettlementRequest) GetOutcomeHash() string {
+	if x != nil {
+		return x.OutcomeHash
+	}
+	return ""
+}
+
+func (x *SettlementRequest) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *SettlementRequest) GetItems() []*SettlementItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// 单个玩家的结算结果。
+type SettlementItemResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        uint32                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	Code          ErrorCode              `protobuf:"varint,2,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	Currency      string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SettlementItemResult) Reset() {
+	*x = SettlementItemResult{}
+	mi := &file_lottery_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettlementItemResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettlementItemResult) ProtoMessage() {}
+
+func (x *SettlementItemResult) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettlementItemResult.ProtoReflect.Descriptor instead.
+func (*SettlementItemResult) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SettlementItemResult) GetUserId() uint32 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *SettlementItemResult) GetCode() ErrorCode {
+	if x != nil {
+		return x.Code
+	}
+	return ErrorCode_OK
+}
+
+func (x *SettlementItemResult) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+func (x *SettlementItemResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// 批量结算响应。
+type SettlementResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Code          ErrorCode               `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	RoundId       string                  `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	State         string                  `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	SettlementId  string                  `protobuf:"bytes,4,opt,name=settlementId,proto3" json:"settlementId,omitempty"`
+	Items         []*SettlementItemResult `protobuf:"bytes,5,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SettlementResponse) Reset() {
+	*x = SettlementResponse{}
+	mi := &file_lottery_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettlementResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettlementResponse) ProtoMessage() {}
+
+func (x *SettlementResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettlementResponse.ProtoReflect.Descriptor instead.
+func (*SettlementResponse) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SettlementResponse) GetCode() ErrorCode {
+	if x != nil {
+		return x.Code
+	}
+	return ErrorCode_OK
+}
+
+func (x *SettlementResponse) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *SettlementResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *SettlementResponse) GetSettlementId() string {
+	if x != nil {
+		return x.SettlementId
+	}
+	return ""
+}
+
+func (x *SettlementResponse) GetItems() []*SettlementItemResult {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// 按牌局编号查询资金状态。
+type GetRoundFinanceStateReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RoundId       string                 `protobuf:"bytes,1,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRoundFinanceStateReq) Reset() {
+	*x = GetRoundFinanceStateReq{}
+	mi := &file_lottery_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRoundFinanceStateReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRoundFinanceStateReq) ProtoMessage() {}
+
+func (x *GetRoundFinanceStateReq) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRoundFinanceStateReq.ProtoReflect.Descriptor instead.
+func (*GetRoundFinanceStateReq) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetRoundFinanceStateReq) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+// 牌局资金状态快照。
+type GetRoundFinanceStateResp struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Code    ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	RoundId string                 `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	// BETTING、RESERVED、SETTLED、VOIDED、RELEASED 或 EXPIRED。
+	State         string `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	BetDigest     string `protobuf:"bytes,4,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	ReservationId string `protobuf:"bytes,5,opt,name=reservationId,proto3" json:"reservationId,omitempty"`
+	OutcomeHash   string `protobuf:"bytes,6,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
+	ExpiresAt     int64  `protobuf:"varint,7,opt,name=expiresAt,proto3" json:"expiresAt,omitempty"`
+	SettlementId  string `protobuf:"bytes,8,opt,name=settlementId,proto3" json:"settlementId,omitempty"`
+	// 本局全部已接受下注换算后的 CNY 总额。
+	TotalBetCny string `protobuf:"bytes,9,opt,name=totalBetCny,proto3" json:"totalBetCny,omitempty"`
+	// 当前预留记录的 CNY 金额。
+	TotalReservedCny string `protobuf:"bytes,10,opt,name=totalReservedCny,proto3" json:"totalReservedCny,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetRoundFinanceStateResp) Reset() {
+	*x = GetRoundFinanceStateResp{}
+	mi := &file_lottery_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRoundFinanceStateResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRoundFinanceStateResp) ProtoMessage() {}
+
+func (x *GetRoundFinanceStateResp) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRoundFinanceStateResp.ProtoReflect.Descriptor instead.
+func (*GetRoundFinanceStateResp) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetRoundFinanceStateResp) GetCode() ErrorCode {
+	if x != nil {
+		return x.Code
+	}
+	return ErrorCode_OK
+}
+
+func (x *GetRoundFinanceStateResp) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetBetDigest() string {
+	if x != nil {
+		return x.BetDigest
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetOutcomeHash() string {
+	if x != nil {
+		return x.OutcomeHash
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *GetRoundFinanceStateResp) GetSettlementId() string {
+	if x != nil {
+		return x.SettlementId
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetTotalBetCny() string {
+	if x != nil {
+		return x.TotalBetCny
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetTotalReservedCny() string {
+	if x != nil {
+		return x.TotalReservedCny
+	}
+	return ""
 }
 
 var File_lottery_proto protoreflect.FileDescriptor
@@ -2204,203 +1344,126 @@ var File_lottery_proto protoreflect.FileDescriptor
 const file_lottery_proto_rawDesc = "" +
 	"\n" +
 	"\rlottery.proto\x12\alottery\x1a\n" +
-	"base.proto\"k\n" +
-	"\x13PoolAmountResultReq\x12\x18\n" +
-	"\aagentId\x18\x01 \x01(\rR\aagentId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\"\n" +
-	"\fcurrencyType\x18\x04 \x01(\tR\fcurrencyType\"X\n" +
-	"\x14PoolAmountResultResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"c\n" +
-	"\x17QKLSettleMultiplayerReq\x12,\n" +
-	"\arecords\x18\x01 \x03(\v2\x12.lottery.QKLRecordR\arecords\x12\x1a\n" +
-	"\btotalWin\x18\x02 \x01(\tR\btotalWin\"H\n" +
-	"\x12QKLNewCurrencyItem\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"{\n" +
-	"\x18QKLSettleMultiplayerResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x129\n" +
-	"\tcurrencys\x18\x02 \x03(\v2\x1b.lottery.QKLNewCurrencyItemR\tcurrencys\"\xff\x01\n" +
-	"\tQKLRecord\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03win\x18\x03 \x01(\tR\x03win\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x10\n" +
-	"\x03log\x18\x05 \x01(\tR\x03log\x12\x10\n" +
-	"\x03bet\x18\x06 \x01(\tR\x03bet\x12\x1a\n" +
-	"\bplayDate\x18\a \x01(\x03R\bplayDate\x12\"\n" +
-	"\fcurrencyType\x18\t \x01(\tR\fcurrencyType\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\x18\n" +
-	"\aaccount\x18\v \x01(\tR\aaccount\"L\n" +
-	"\x1cQKLSaveMultiplayerRecordsReq\x12,\n" +
-	"\arecords\x18\x01 \x03(\v2\x12.lottery.QKLRecordR\arecords\"\x80\x01\n" +
-	"\x1dQKLSaveMultiplayerRecordsResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x129\n" +
-	"\tcurrencys\x18\x02 \x03(\v2\x1b.lottery.QKLNewCurrencyItemR\tcurrencys\"\xd2\x01\n" +
-	"\x1aQKLDoMultiplayerCashoutReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03win\x18\x03 \x01(\tR\x03win\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x1a\n" +
-	"\bcomplete\x18\b \x01(\bR\bcomplete\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"_\n" +
-	"\x1bQKLDoMultiplayerCashoutResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xd2\x01\n" +
-	"\x1eQKLCancelBetMultiplayerGameReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03bet\x18\x03 \x01(\tR\x03bet\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x16\n" +
-	"\x06areaId\x18\x05 \x01(\rR\x06areaId\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"c\n" +
-	"\x1fQKLCancelBetMultiplayerGameResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xd6\x01\n" +
-	"\x1aQKLDoBetMultiplayerGameReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x16\n" +
-	"\x06areaId\x18\x05 \x01(\rR\x06areaId\x12\x18\n" +
-	"\ainitBet\x18\t \x01(\tR\ainitBet\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"_\n" +
-	"\x1bQKLDoBetMultiplayerGameResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xed\x01\n" +
-	"\vQKLDoBetReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03win\x18\x03 \x01(\tR\x03win\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x16\n" +
-	"\x06result\x18\a \x01(\tR\x06result\x12\x1a\n" +
-	"\bcomplete\x18\b \x01(\bR\bcomplete\x12\x10\n" +
-	"\x03bet\x18\n" +
-	" \x01(\tR\x03bet\x12\x18\n" +
-	"\aagentId\x18\v \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\f \x01(\tR\fcurrencyType\"P\n" +
-	"\fQKLDoBetResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xb3\x01\n" +
-	"\x0fQKLDoBetStopReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x18\n" +
-	"\ainitBet\x18\t \x01(\tR\ainitBet\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"T\n" +
-	"\x10QKLDoBetStopResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\x96\x02\n" +
-	"\x1aQKLDoBetSettleWithCheckReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03win\x18\x03 \x01(\tR\x03win\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x10\n" +
-	"\x03hit\x18\x06 \x01(\tR\x03hit\x12\x16\n" +
-	"\x06result\x18\a \x01(\tR\x06result\x12\x1a\n" +
-	"\bcomplete\x18\b \x01(\bR\bcomplete\x12\x18\n" +
-	"\ainitBet\x18\t \x01(\tR\ainitBet\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"}\n" +
-	"\x1bQKLDoBetSettleWithCheckResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\x12\x1c\n" +
-	"\tcanAfford\x18\x03 \x01(\bR\tcanAfford\"\xb5\x02\n" +
-	"\x11QKLDoBetSettleReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03win\x18\x03 \x01(\tR\x03win\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x10\n" +
-	"\x03hit\x18\x06 \x01(\bR\x03hit\x12\x16\n" +
-	"\x06result\x18\a \x01(\tR\x06result\x12\x1a\n" +
-	"\btotalBet\x18\b \x01(\tR\btotalBet\x12\x1a\n" +
-	"\bcomplete\x18\t \x01(\bR\bcomplete\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\x12$\n" +
-	"\rguaranteedWin\x18\f \x01(\bR\rguaranteedWin\"V\n" +
-	"\x12QKLDoBetSettleResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xab\x01\n" +
-	"\x0fQKLDoBetMoreReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03bet\x18\x03 \x01(\tR\x03bet\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"T\n" +
-	"\x10QKLDoBetMoreResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xdf\x01\n" +
-	"\x13QKLDoBetContinueReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12$\n" +
-	"\rguaranteedWin\x18\x06 \x01(\bR\rguaranteedWin\x12\x1a\n" +
-	"\bdeltaWin\x18\a \x01(\tR\bdeltaWin\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"Z\n" +
-	"\x14QKLDoBetContinueResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1c\n" +
-	"\tcanAfford\x18\x02 \x01(\bR\tcanAfford\"\xab\x01\n" +
-	"\x0fQKLDoBetInitReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\x16\n" +
-	"\x06gameId\x18\x02 \x01(\rR\x06gameId\x12\x10\n" +
-	"\x03bet\x18\x03 \x01(\tR\x03bet\x12\x18\n" +
-	"\aroundID\x18\x04 \x01(\tR\aroundID\x12\x18\n" +
-	"\aagentId\x18\n" +
-	" \x01(\rR\aagentId\x12\"\n" +
-	"\fcurrencyType\x18\v \x01(\tR\fcurrencyType\"T\n" +
-	"\x10QKLDoBetInitResp\x12$\n" +
-	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xd7\x02\n" +
-	"\x0fSlotsLotteryReq\x12\x1a\n" +
-	"\bplayerId\x18\x01 \x01(\rR\bplayerId\x12\"\n" +
-	"\fcurrencyType\x18\x05 \x01(\tR\fcurrencyType\x12\x18\n" +
-	"\aagentId\x18\x06 \x01(\x03R\aagentId\x12\x16\n" +
-	"\x06gameId\x18\a \x01(\rR\x06gameId\x12\x1e\n" +
+	"base.proto\"\x8b\x01\n" +
+	"\aBetItem\x12\x14\n" +
+	"\x05betId\x18\x01 \x01(\tR\x05betId\x12\x16\n" +
+	"\x06userId\x18\x02 \x01(\rR\x06userId\x12\"\n" +
+	"\fcurrencyType\x18\x03 \x01(\tR\fcurrencyType\x12\x16\n" +
+	"\x06amount\x18\x04 \x01(\tR\x06amount\x12\x16\n" +
+	"\x06areaId\x18\x05 \x01(\tR\x06areaId\"\xbc\x01\n" +
 	"\n" +
-	"profitLoss\x18\b \x01(\tR\n" +
-	"profitLoss\x12\x10\n" +
-	"\x03bet\x18\t \x01(\tR\x03bet\x12\x14\n" +
-	"\x05state\x18\n" +
-	" \x01(\tR\x05state\x12\x14\n" +
-	"\x05token\x18\v \x01(\tR\x05token\x12\x18\n" +
-	"\aroundID\x18\f \x01(\tR\aroundID\x12$\n" +
-	"\rmaxProfitLoss\x18\r \x01(\tR\rmaxProfitLoss\x12\x1a\n" +
-	"\bcomplete\x18\x0e \x01(\bR\bcomplete\x12\x18\n" +
-	"\aaccount\x18\x0f \x01(\tR\aaccount\"\x84\x01\n" +
-	"\x10SlotsLotteryResp\x12 \n" +
-	"\vnewCurrency\x18\x01 \x01(\tR\vnewCurrency\x12\x16\n" +
-	"\x06result\x18\x02 \x01(\bR\x06result\x12\x10\n" +
-	"\x03pay\x18\x03 \x01(\tR\x03pay\x12$\n" +
-	"\x04code\x18\x04 \x01(\x0e2\x10.base.error_codeR\x04code2\xb7\t\n" +
-	"\x0eLotteryService\x12O\n" +
-	"\x10PoolAmountResult\x12\x1c.lottery.PoolAmountResultReq\x1a\x1d.lottery.PoolAmountResultResp\x12C\n" +
-	"\fSlotsLottery\x12\x18.lottery.SlotsLotteryReq\x1a\x19.lottery.SlotsLotteryResp\x12C\n" +
-	"\fQKLDoBetInit\x12\x18.lottery.QKLDoBetInitReq\x1a\x19.lottery.QKLDoBetInitResp\x12C\n" +
-	"\fQKLDoBetMore\x12\x18.lottery.QKLDoBetMoreReq\x1a\x19.lottery.QKLDoBetMoreResp\x12O\n" +
-	"\x10QKLDoBetContinue\x12\x1c.lottery.QKLDoBetContinueReq\x1a\x1d.lottery.QKLDoBetContinueResp\x12I\n" +
-	"\x0eQKLDoBetSettle\x12\x1a.lottery.QKLDoBetSettleReq\x1a\x1b.lottery.QKLDoBetSettleResp\x12d\n" +
-	"\x17QKLDoBetSettleWithCheck\x12#.lottery.QKLDoBetSettleWithCheckReq\x1a$.lottery.QKLDoBetSettleWithCheckResp\x12C\n" +
-	"\fQKLDoBetStop\x12\x18.lottery.QKLDoBetStopReq\x1a\x19.lottery.QKLDoBetStopResp\x127\n" +
-	"\bQKLDoBet\x12\x14.lottery.QKLDoBetReq\x1a\x15.lottery.QKLDoBetResp\x12d\n" +
-	"\x17QKLDoBetMultiplayerGame\x12#.lottery.QKLDoBetMultiplayerGameReq\x1a$.lottery.QKLDoBetMultiplayerGameResp\x12p\n" +
-	"\x1bQKLCancelBetMultiplayerGame\x12'.lottery.QKLCancelBetMultiplayerGameReq\x1a(.lottery.QKLCancelBetMultiplayerGameResp\x12d\n" +
-	"\x17QKLDoMultiplayerCashout\x12#.lottery.QKLDoMultiplayerCashoutReq\x1a$.lottery.QKLDoMultiplayerCashoutResp\x12j\n" +
-	"\x19QKLSaveMultiplayerRecords\x12%.lottery.QKLSaveMultiplayerRecordsReq\x1a&.lottery.QKLSaveMultiplayerRecordsResp\x12[\n" +
-	"\x14QKLSettleMultiplayer\x12 .lottery.QKLSettleMultiplayerReq\x1a!.lottery.QKLSettleMultiplayerRespB\x15Z\x13./services;servicesb\x06proto3"
+	"BetRequest\x12\x1c\n" +
+	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x16\n" +
+	"\x06gameId\x18\x03 \x01(\rR\x06gameId\x12\x14\n" +
+	"\x05agent\x18\x04 \x01(\rR\x05agent\x12\x14\n" +
+	"\x05level\x18\x05 \x01(\rR\x05level\x12&\n" +
+	"\x05items\x18\b \x03(\v2\x10.lottery.BetItemR\x05itemsJ\x04\b\x06\x10\aJ\x04\b\a\x10\b\"\xb5\x01\n" +
+	"\rBetItemResult\x12\x14\n" +
+	"\x05betId\x18\x01 \x01(\tR\x05betId\x12\x16\n" +
+	"\x06userId\x18\x02 \x01(\rR\x06userId\x12$\n" +
+	"\x04code\x18\x03 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
+	"\baccepted\x18\x04 \x01(\bR\baccepted\x12\x1a\n" +
+	"\bcurrency\x18\x05 \x01(\tR\bcurrency\x12\x18\n" +
+	"\amessage\x18\x06 \x01(\tR\amessage\"\xaf\x01\n" +
+	"\vBetResponse\x12$\n" +
+	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x14\n" +
+	"\x05state\x18\x03 \x01(\tR\x05state\x12\x1c\n" +
+	"\tbetDigest\x18\x04 \x01(\tR\tbetDigest\x12,\n" +
+	"\x05items\x18\x05 \x03(\v2\x16.lottery.BetItemResultR\x05items\"`\n" +
+	"\n" +
+	"PrePayItem\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\"\n" +
+	"\fcurrencyType\x18\x02 \x01(\tR\fcurrencyType\x12\x16\n" +
+	"\x06payout\x18\x03 \x01(\tR\x06payout\"\x9e\x02\n" +
+	"\rPrePayRequest\x12\x1c\n" +
+	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x16\n" +
+	"\x06gameId\x18\x03 \x01(\rR\x06gameId\x12\x14\n" +
+	"\x05agent\x18\x04 \x01(\rR\x05agent\x12\x14\n" +
+	"\x05level\x18\x05 \x01(\rR\x05level\x12\x1c\n" +
+	"\tbetDigest\x18\x06 \x01(\tR\tbetDigest\x12 \n" +
+	"\voutcomeHash\x18\a \x01(\tR\voutcomeHash\x12&\n" +
+	"\x0etimeoutSeconds\x18\b \x01(\rR\x0etimeoutSeconds\x12)\n" +
+	"\x05items\x18\t \x03(\v2\x13.lottery.PrePayItemR\x05items\"\xc4\x02\n" +
+	"\x0ePrePayResponse\x12$\n" +
+	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
+	"\aroundId\x18\x03 \x01(\tR\aroundId\x12\x14\n" +
+	"\x05state\x18\x04 \x01(\tR\x05state\x12$\n" +
+	"\rreservationId\x18\x05 \x01(\tR\rreservationId\x12&\n" +
+	"\x0etotalPayoutCny\x18\x06 \x01(\tR\x0etotalPayoutCny\x12\x1c\n" +
+	"\texpiresAt\x18\a \x01(\x03R\texpiresAt\x12\x16\n" +
+	"\x06reason\x18\b \x01(\tR\x06reason\x12\x1c\n" +
+	"\tbetDigest\x18\t \x01(\tR\tbetDigest\x12 \n" +
+	"\voutcomeHash\x18\n" +
+	" \x01(\tR\voutcomeHash\"\xda\x01\n" +
+	"\x12RenewPrePayRequest\x12\x1c\n" +
+	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12$\n" +
+	"\rreservationId\x18\x03 \x01(\tR\rreservationId\x12\x1c\n" +
+	"\tbetDigest\x18\x04 \x01(\tR\tbetDigest\x12 \n" +
+	"\voutcomeHash\x18\x05 \x01(\tR\voutcomeHash\x12&\n" +
+	"\x0etimeoutSeconds\x18\x06 \x01(\rR\x0etimeoutSeconds\"\xb4\x01\n" +
+	"\x14ReleasePrePayRequest\x12\x1c\n" +
+	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12$\n" +
+	"\rreservationId\x18\x03 \x01(\tR\rreservationId\x12\x1c\n" +
+	"\tbetDigest\x18\x04 \x01(\tR\tbetDigest\x12 \n" +
+	"\voutcomeHash\x18\x05 \x01(\tR\voutcomeHash\"\xb2\x01\n" +
+	"\x0eSettlementItem\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\"\n" +
+	"\fcurrencyType\x18\x02 \x01(\tR\fcurrencyType\x12\x1c\n" +
+	"\tbetAmount\x18\x03 \x01(\tR\tbetAmount\x12\x16\n" +
+	"\x06payout\x18\x04 \x01(\tR\x06payout\x12\x16\n" +
+	"\x06profit\x18\x05 \x01(\tR\x06profit\x12\x16\n" +
+	"\x06record\x18\x06 \x01(\tR\x06record\"\xbe\x02\n" +
+	"\x11SettlementRequest\x12\"\n" +
+	"\fsettlementId\x18\x01 \x01(\tR\fsettlementId\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x16\n" +
+	"\x06gameId\x18\x03 \x01(\rR\x06gameId\x12\x14\n" +
+	"\x05agent\x18\x04 \x01(\rR\x05agent\x12\x14\n" +
+	"\x05level\x18\x05 \x01(\rR\x05level\x12$\n" +
+	"\rreservationId\x18\x06 \x01(\tR\rreservationId\x12\x1c\n" +
+	"\tbetDigest\x18\a \x01(\tR\tbetDigest\x12 \n" +
+	"\voutcomeHash\x18\b \x01(\tR\voutcomeHash\x12\x12\n" +
+	"\x04mode\x18\t \x01(\tR\x04mode\x12-\n" +
+	"\x05items\x18\n" +
+	" \x03(\v2\x17.lottery.SettlementItemR\x05items\"\x8a\x01\n" +
+	"\x14SettlementItemResult\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\rR\x06userId\x12$\n" +
+	"\x04code\x18\x02 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"\xc3\x01\n" +
+	"\x12SettlementResponse\x12$\n" +
+	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x14\n" +
+	"\x05state\x18\x03 \x01(\tR\x05state\x12\"\n" +
+	"\fsettlementId\x18\x04 \x01(\tR\fsettlementId\x123\n" +
+	"\x05items\x18\x05 \x03(\v2\x1d.lottery.SettlementItemResultR\x05items\"3\n" +
+	"\x17GetRoundFinanceStateReq\x12\x18\n" +
+	"\aroundId\x18\x01 \x01(\tR\aroundId\"\xe6\x02\n" +
+	"\x18GetRoundFinanceStateResp\x12$\n" +
+	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x14\n" +
+	"\x05state\x18\x03 \x01(\tR\x05state\x12\x1c\n" +
+	"\tbetDigest\x18\x04 \x01(\tR\tbetDigest\x12$\n" +
+	"\rreservationId\x18\x05 \x01(\tR\rreservationId\x12 \n" +
+	"\voutcomeHash\x18\x06 \x01(\tR\voutcomeHash\x12\x1c\n" +
+	"\texpiresAt\x18\a \x01(\x03R\texpiresAt\x12\"\n" +
+	"\fsettlementId\x18\b \x01(\tR\fsettlementId\x12 \n" +
+	"\vtotalBetCny\x18\t \x01(\tR\vtotalBetCny\x12*\n" +
+	"\x10totalReservedCny\x18\n" +
+	" \x01(\tR\x10totalReservedCny2\xaf\x03\n" +
+	"\x0eLotteryService\x120\n" +
+	"\x03Bet\x12\x13.lottery.BetRequest\x1a\x14.lottery.BetResponse\x129\n" +
+	"\x06PrePay\x12\x16.lottery.PrePayRequest\x1a\x17.lottery.PrePayResponse\x12C\n" +
+	"\vRenewPrePay\x12\x1b.lottery.RenewPrePayRequest\x1a\x17.lottery.PrePayResponse\x12G\n" +
+	"\rReleasePrePay\x12\x1d.lottery.ReleasePrePayRequest\x1a\x17.lottery.PrePayResponse\x12E\n" +
+	"\n" +
+	"Settlement\x12\x1a.lottery.SettlementRequest\x1a\x1b.lottery.SettlementResponse\x12[\n" +
+	"\x14GetRoundFinanceState\x12 .lottery.GetRoundFinanceStateReq\x1a!.lottery.GetRoundFinanceStateRespB\x15Z\x13./services;servicesb\x06proto3"
 
 var (
 	file_lottery_proto_rawDescOnce sync.Once
@@ -2414,92 +1477,54 @@ func file_lottery_proto_rawDescGZIP() []byte {
 	return file_lottery_proto_rawDescData
 }
 
-var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_lottery_proto_goTypes = []any{
-	(*PoolAmountResultReq)(nil),             // 0: lottery.PoolAmountResultReq
-	(*PoolAmountResultResp)(nil),            // 1: lottery.PoolAmountResultResp
-	(*QKLSettleMultiplayerReq)(nil),         // 2: lottery.QKLSettleMultiplayerReq
-	(*QKLNewCurrencyItem)(nil),              // 3: lottery.QKLNewCurrencyItem
-	(*QKLSettleMultiplayerResp)(nil),        // 4: lottery.QKLSettleMultiplayerResp
-	(*QKLRecord)(nil),                       // 5: lottery.QKLRecord
-	(*QKLSaveMultiplayerRecordsReq)(nil),    // 6: lottery.QKLSaveMultiplayerRecordsReq
-	(*QKLSaveMultiplayerRecordsResp)(nil),   // 7: lottery.QKLSaveMultiplayerRecordsResp
-	(*QKLDoMultiplayerCashoutReq)(nil),      // 8: lottery.QKLDoMultiplayerCashoutReq
-	(*QKLDoMultiplayerCashoutResp)(nil),     // 9: lottery.QKLDoMultiplayerCashoutResp
-	(*QKLCancelBetMultiplayerGameReq)(nil),  // 10: lottery.QKLCancelBetMultiplayerGameReq
-	(*QKLCancelBetMultiplayerGameResp)(nil), // 11: lottery.QKLCancelBetMultiplayerGameResp
-	(*QKLDoBetMultiplayerGameReq)(nil),      // 12: lottery.QKLDoBetMultiplayerGameReq
-	(*QKLDoBetMultiplayerGameResp)(nil),     // 13: lottery.QKLDoBetMultiplayerGameResp
-	(*QKLDoBetReq)(nil),                     // 14: lottery.QKLDoBetReq
-	(*QKLDoBetResp)(nil),                    // 15: lottery.QKLDoBetResp
-	(*QKLDoBetStopReq)(nil),                 // 16: lottery.QKLDoBetStopReq
-	(*QKLDoBetStopResp)(nil),                // 17: lottery.QKLDoBetStopResp
-	(*QKLDoBetSettleWithCheckReq)(nil),      // 18: lottery.QKLDoBetSettleWithCheckReq
-	(*QKLDoBetSettleWithCheckResp)(nil),     // 19: lottery.QKLDoBetSettleWithCheckResp
-	(*QKLDoBetSettleReq)(nil),               // 20: lottery.QKLDoBetSettleReq
-	(*QKLDoBetSettleResp)(nil),              // 21: lottery.QKLDoBetSettleResp
-	(*QKLDoBetMoreReq)(nil),                 // 22: lottery.QKLDoBetMoreReq
-	(*QKLDoBetMoreResp)(nil),                // 23: lottery.QKLDoBetMoreResp
-	(*QKLDoBetContinueReq)(nil),             // 24: lottery.QKLDoBetContinueReq
-	(*QKLDoBetContinueResp)(nil),            // 25: lottery.QKLDoBetContinueResp
-	(*QKLDoBetInitReq)(nil),                 // 26: lottery.QKLDoBetInitReq
-	(*QKLDoBetInitResp)(nil),                // 27: lottery.QKLDoBetInitResp
-	(*SlotsLotteryReq)(nil),                 // 28: lottery.SlotsLotteryReq
-	(*SlotsLotteryResp)(nil),                // 29: lottery.SlotsLotteryResp
-	(ErrorCode)(0),                          // 30: base.error_code
+	(*BetItem)(nil),                  // 0: lottery.BetItem
+	(*BetRequest)(nil),               // 1: lottery.BetRequest
+	(*BetItemResult)(nil),            // 2: lottery.BetItemResult
+	(*BetResponse)(nil),              // 3: lottery.BetResponse
+	(*PrePayItem)(nil),               // 4: lottery.PrePayItem
+	(*PrePayRequest)(nil),            // 5: lottery.PrePayRequest
+	(*PrePayResponse)(nil),           // 6: lottery.PrePayResponse
+	(*RenewPrePayRequest)(nil),       // 7: lottery.RenewPrePayRequest
+	(*ReleasePrePayRequest)(nil),     // 8: lottery.ReleasePrePayRequest
+	(*SettlementItem)(nil),           // 9: lottery.SettlementItem
+	(*SettlementRequest)(nil),        // 10: lottery.SettlementRequest
+	(*SettlementItemResult)(nil),     // 11: lottery.SettlementItemResult
+	(*SettlementResponse)(nil),       // 12: lottery.SettlementResponse
+	(*GetRoundFinanceStateReq)(nil),  // 13: lottery.GetRoundFinanceStateReq
+	(*GetRoundFinanceStateResp)(nil), // 14: lottery.GetRoundFinanceStateResp
+	(ErrorCode)(0),                   // 15: base.error_code
 }
 var file_lottery_proto_depIdxs = []int32{
-	30, // 0: lottery.PoolAmountResultResp.code:type_name -> base.error_code
-	5,  // 1: lottery.QKLSettleMultiplayerReq.records:type_name -> lottery.QKLRecord
-	30, // 2: lottery.QKLSettleMultiplayerResp.code:type_name -> base.error_code
-	3,  // 3: lottery.QKLSettleMultiplayerResp.currencys:type_name -> lottery.QKLNewCurrencyItem
-	5,  // 4: lottery.QKLSaveMultiplayerRecordsReq.records:type_name -> lottery.QKLRecord
-	30, // 5: lottery.QKLSaveMultiplayerRecordsResp.code:type_name -> base.error_code
-	3,  // 6: lottery.QKLSaveMultiplayerRecordsResp.currencys:type_name -> lottery.QKLNewCurrencyItem
-	30, // 7: lottery.QKLDoMultiplayerCashoutResp.code:type_name -> base.error_code
-	30, // 8: lottery.QKLCancelBetMultiplayerGameResp.code:type_name -> base.error_code
-	30, // 9: lottery.QKLDoBetMultiplayerGameResp.code:type_name -> base.error_code
-	30, // 10: lottery.QKLDoBetResp.code:type_name -> base.error_code
-	30, // 11: lottery.QKLDoBetStopResp.code:type_name -> base.error_code
-	30, // 12: lottery.QKLDoBetSettleWithCheckResp.code:type_name -> base.error_code
-	30, // 13: lottery.QKLDoBetSettleResp.code:type_name -> base.error_code
-	30, // 14: lottery.QKLDoBetMoreResp.code:type_name -> base.error_code
-	30, // 15: lottery.QKLDoBetContinueResp.code:type_name -> base.error_code
-	30, // 16: lottery.QKLDoBetInitResp.code:type_name -> base.error_code
-	30, // 17: lottery.SlotsLotteryResp.code:type_name -> base.error_code
-	0,  // 18: lottery.LotteryService.PoolAmountResult:input_type -> lottery.PoolAmountResultReq
-	28, // 19: lottery.LotteryService.SlotsLottery:input_type -> lottery.SlotsLotteryReq
-	26, // 20: lottery.LotteryService.QKLDoBetInit:input_type -> lottery.QKLDoBetInitReq
-	22, // 21: lottery.LotteryService.QKLDoBetMore:input_type -> lottery.QKLDoBetMoreReq
-	24, // 22: lottery.LotteryService.QKLDoBetContinue:input_type -> lottery.QKLDoBetContinueReq
-	20, // 23: lottery.LotteryService.QKLDoBetSettle:input_type -> lottery.QKLDoBetSettleReq
-	18, // 24: lottery.LotteryService.QKLDoBetSettleWithCheck:input_type -> lottery.QKLDoBetSettleWithCheckReq
-	16, // 25: lottery.LotteryService.QKLDoBetStop:input_type -> lottery.QKLDoBetStopReq
-	14, // 26: lottery.LotteryService.QKLDoBet:input_type -> lottery.QKLDoBetReq
-	12, // 27: lottery.LotteryService.QKLDoBetMultiplayerGame:input_type -> lottery.QKLDoBetMultiplayerGameReq
-	10, // 28: lottery.LotteryService.QKLCancelBetMultiplayerGame:input_type -> lottery.QKLCancelBetMultiplayerGameReq
-	8,  // 29: lottery.LotteryService.QKLDoMultiplayerCashout:input_type -> lottery.QKLDoMultiplayerCashoutReq
-	6,  // 30: lottery.LotteryService.QKLSaveMultiplayerRecords:input_type -> lottery.QKLSaveMultiplayerRecordsReq
-	2,  // 31: lottery.LotteryService.QKLSettleMultiplayer:input_type -> lottery.QKLSettleMultiplayerReq
-	1,  // 32: lottery.LotteryService.PoolAmountResult:output_type -> lottery.PoolAmountResultResp
-	29, // 33: lottery.LotteryService.SlotsLottery:output_type -> lottery.SlotsLotteryResp
-	27, // 34: lottery.LotteryService.QKLDoBetInit:output_type -> lottery.QKLDoBetInitResp
-	23, // 35: lottery.LotteryService.QKLDoBetMore:output_type -> lottery.QKLDoBetMoreResp
-	25, // 36: lottery.LotteryService.QKLDoBetContinue:output_type -> lottery.QKLDoBetContinueResp
-	21, // 37: lottery.LotteryService.QKLDoBetSettle:output_type -> lottery.QKLDoBetSettleResp
-	19, // 38: lottery.LotteryService.QKLDoBetSettleWithCheck:output_type -> lottery.QKLDoBetSettleWithCheckResp
-	17, // 39: lottery.LotteryService.QKLDoBetStop:output_type -> lottery.QKLDoBetStopResp
-	15, // 40: lottery.LotteryService.QKLDoBet:output_type -> lottery.QKLDoBetResp
-	13, // 41: lottery.LotteryService.QKLDoBetMultiplayerGame:output_type -> lottery.QKLDoBetMultiplayerGameResp
-	11, // 42: lottery.LotteryService.QKLCancelBetMultiplayerGame:output_type -> lottery.QKLCancelBetMultiplayerGameResp
-	9,  // 43: lottery.LotteryService.QKLDoMultiplayerCashout:output_type -> lottery.QKLDoMultiplayerCashoutResp
-	7,  // 44: lottery.LotteryService.QKLSaveMultiplayerRecords:output_type -> lottery.QKLSaveMultiplayerRecordsResp
-	4,  // 45: lottery.LotteryService.QKLSettleMultiplayer:output_type -> lottery.QKLSettleMultiplayerResp
-	32, // [32:46] is the sub-list for method output_type
-	18, // [18:32] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	0,  // 0: lottery.BetRequest.items:type_name -> lottery.BetItem
+	15, // 1: lottery.BetItemResult.code:type_name -> base.error_code
+	15, // 2: lottery.BetResponse.code:type_name -> base.error_code
+	2,  // 3: lottery.BetResponse.items:type_name -> lottery.BetItemResult
+	4,  // 4: lottery.PrePayRequest.items:type_name -> lottery.PrePayItem
+	15, // 5: lottery.PrePayResponse.code:type_name -> base.error_code
+	9,  // 6: lottery.SettlementRequest.items:type_name -> lottery.SettlementItem
+	15, // 7: lottery.SettlementItemResult.code:type_name -> base.error_code
+	15, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
+	11, // 9: lottery.SettlementResponse.items:type_name -> lottery.SettlementItemResult
+	15, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
+	1,  // 11: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
+	5,  // 12: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
+	7,  // 13: lottery.LotteryService.RenewPrePay:input_type -> lottery.RenewPrePayRequest
+	8,  // 14: lottery.LotteryService.ReleasePrePay:input_type -> lottery.ReleasePrePayRequest
+	10, // 15: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
+	13, // 16: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
+	3,  // 17: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
+	6,  // 18: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
+	6,  // 19: lottery.LotteryService.RenewPrePay:output_type -> lottery.PrePayResponse
+	6,  // 20: lottery.LotteryService.ReleasePrePay:output_type -> lottery.PrePayResponse
+	12, // 21: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
+	14, // 22: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
+	17, // [17:23] is the sub-list for method output_type
+	11, // [11:17] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_lottery_proto_init() }
@@ -2514,7 +1539,7 @@ func file_lottery_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lottery_proto_rawDesc), len(file_lottery_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

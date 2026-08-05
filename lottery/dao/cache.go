@@ -1,618 +1,236 @@
 package dao
 
 import (
-	"app/config"
 	"context"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 )
 
-const (
-	SYSTEM_CTRL    = 1 //系统控制
-	AUTO_CTRL      = 2 //自动控制
-	DefaultRevenue = 0.03
-)
+var gameCache *GameCacheMgr
 
-var gameCache *GameCacheMgr = nil
-var singleCtrl *SingleCtrlMgr = nil
-
-// 玩家数据对象
+// User 保存玩家级累计统计；所有金额都使用玩家原币种。
 type User struct {
-	TotalEffectBet decimal.Decimal //总有效投注 (lose)
-	TotalProfLoss  decimal.Decimal //总亏损     (win)
-	Count          decimal.Decimal //下注局数
-	UpdateTime     int64           //更新时间
-	UserId         uint32          //玩家id
-	AgentId        int64           //代理id
-	Account        string          //平台账号
-	IsTourist      int32           //是否是游客账号 0 否  1 是
+	TotalEffectBet decimal.Decimal
+	TotalProfLoss  decimal.Decimal
+	Count          decimal.Decimal
+	UpdateTime     int64
+	UserId         uint32
+	AgentId        int64
+	Account        string
+	IsTourist      int32
 }
 
-// 游戏数据对象
+// Game 保存单个 agent + symbol + level 奖池的 CNY 累计值。
 type Game struct {
-	TotalEffectBet decimal.Decimal //总有效投注 (win)
-	TotalChips     decimal.Decimal //总打码    （下注金额||返奖金额）绝对值，谁大取谁 的总和
-	TotalProfLoss  decimal.Decimal //总亏损     (lose)
-	TotalRevenue   decimal.Decimal //总税收
-	UpdateTime     int64           //更新时间
-	AgentId        int64           //代理id
-	Symbol         string          //游戏标识
+	TotalEffectBet decimal.Decimal // 代理累计有效下注。
+	TotalChips     decimal.Decimal
+	TotalProfLoss  decimal.Decimal // 代理累计总赔付，即每局玩家实际 payout 之和。
+	TotalRevenue   decimal.Decimal // 代理累计税收。
+	UpdateTime     int64
+	AgentId        int64
+	Symbol         string
 }
 
-type Ctrl struct {
-	Rate       decimal.Decimal `json:"rate"`
-	UserId     uint32          `json:"userId"`
-	RateScore  decimal.Decimal `json:"rate_score"`
-	LetScore   decimal.Decimal `json:"left_score"`
-	TYPE       int             `json:"type"`
-	IsDel      bool            `json:"-"` //是否删除
-	UpdateTime int64           `json:"-"`
-}
-
-type RoundItem struct {
-	MaxPay  decimal.Decimal `json:"maxPay"`  //最大赔付
-	Over    bool            `json:"over"`    //是否完成
-	AgentId int64           `json:"agentId"` //所属代理
-	RoundId string          `json:"roundId"` //注单id
-	Saved   bool            `json:"saved"`   //是否保存
-}
-
+// AgentData 隔离不同代理下的玩家统计和分等级游戏奖池。
 type AgentData struct {
-	lock       *sync.RWMutex
-	Id         int64
-	WebId      int64
-	gameCache  map[string]*Game      //key:{symbol}
-	userCache  map[uint32]*User      //
-	RoundCache map[string]*RoundItem //key:注单号 value:最大赔付值
+	lock      *sync.RWMutex
+	Id        int64
+	WebId     int64
+	gameCache map[string]*Game
+	userCache map[uint32]*User
 }
 
-func (ad *AgentData) GetUser(userId uint32) *User {
-	u := ad.userCache[userId]
-	if u == nil {
-		e, p, c, acc, isTourist := RedisIns().GetUserStatData(userId)
-		u = &User{
-			TotalEffectBet: e,
-			TotalProfLoss:  p,
-			UserId:         userId,
-			AgentId:        ad.Id,
-			Count:          c,
-			Account:        acc,
-			IsTourist:      isTourist,
-		}
-		ad.SetUser(userId, u)
+func (ad *AgentData) GetUser(userID uint32) *User {
+	user := ad.userCache[userID]
+	if user != nil {
+		return user
 	}
-	return u
-}
 
-func (ad *AgentData) SetUser(id uint32, u *User) {
-	u.UserId = id
-	u.AgentId = ad.Id
-	ad.userCache[id] = u
+	effectBet, profitLoss, count, account, isTourist := RedisIns().GetUserStatData(userID)
+	user = &User{
+		TotalEffectBet: effectBet,
+		TotalProfLoss:  profitLoss,
+		Count:          count,
+		UserId:         userID,
+		AgentId:        ad.Id,
+		Account:        account,
+		IsTourist:      isTourist,
+	}
+	ad.userCache[userID] = user
+	return user
 }
 
 func (ad *AgentData) GetGame(symbol string) *Game {
-	g := ad.gameCache[symbol]
-	if g == nil {
-		e, c, p, r, _ := RedisIns().GetGameStatData(ad.Id, symbol)
-		g = &Game{
-			TotalEffectBet: e,
-			TotalChips:     c,
-			TotalProfLoss:  p,
-			TotalRevenue:   r,
-			AgentId:        ad.Id,
-		}
-		ad.SetGame(symbol, g)
-	}
-	return g
-}
-
-func (ad *AgentData) SetGame(symbol string, g *Game) {
-	g.AgentId = ad.Id
-	g.Symbol = symbol
-	ad.gameCache[symbol] = g
-}
-
-type SingleCtrlMgr struct {
-	lock *sync.RWMutex
-	r    *rand.Rand
-	sc   map[uint32]*Ctrl //单控列表
-}
-
-func (s *SingleCtrlMgr) getSingleCtrl(uid uint32) *Ctrl {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
-	return s.sc[uid]
-}
-
-func (s *SingleCtrlMgr) setSingleCtrlScore(uid uint32, delta decimal.Decimal) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if ctl := s.sc[uid]; ctl != nil {
-		ctl.LetScore = ctl.LetScore.Sub(delta)
-		if ctl.LetScore.LessThanOrEqual(decimal.Zero) {
-			ctl.IsDel = true
-		}
-		ctl.UpdateTime = time.Now().Unix()
-	}
-}
-
-func (s *SingleCtrlMgr) randInt(n int) int {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if s.r == nil {
-		s.r = rand.New(rand.NewSource(time.Now().UnixNano()))
-	}
-	return s.r.Intn(n)
-}
-
-func (s *SingleCtrlMgr) addSingleCtrl(uid uint32, rate, ctrl decimal.Decimal, t int) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	tmp := &Ctrl{
-		LetScore:   ctrl,
-		UserId:     uid,
-		RateScore:  ctrl,
-		Rate:       rate,
-		IsDel:      false,
-		UpdateTime: time.Now().Unix(),
-		TYPE:       t,
+	game := ad.gameCache[symbol]
+	if game != nil {
+		return game
 	}
 
-	if ctrl := s.sc[uid]; ctrl != nil {
-		if t == SYSTEM_CTRL {
-			s.sc[uid] = tmp
-		} else {
-			if ctrl.TYPE == AUTO_CTRL {
-				if ctrl.IsDel {
-					s.sc[uid] = tmp
-				}
-			}
-		}
-	} else {
-		s.sc[uid] = tmp
+	effectBet, chips, profitLoss, revenue, _ := RedisIns().GetGameStatData(ad.Id, symbol)
+	game = &Game{
+		TotalEffectBet: effectBet,
+		TotalChips:     chips,
+		TotalProfLoss:  profitLoss,
+		TotalRevenue:   revenue,
+		AgentId:        ad.Id,
+		Symbol:         symbol,
 	}
+	ad.gameCache[symbol] = game
+	return game
 }
 
-func (s *SingleCtrlMgr) delSingleCtrl(uid uint32) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	delete(s.sc, uid)
-}
-
-// 同步入库
-func (s *SingleCtrlMgr) flushDB() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	piple, n, delIds := RedisIns().cli.Pipeline(), 0, make([]uint32, 0, 64)
-	for k, v := range s.sc {
-		if v.UpdateTime <= 0 {
-			continue
-		}
-		n++
-		itemKey := fmt.Sprintf("%d", k)
-		str, _ := jsoniter.MarshalToString(v)
-		if v.IsDel {
-			piple.HDel(context.Background(), "user_ctl", itemKey)
-			delIds = append(delIds, k)
-		} else {
-			piple.HSet(context.Background(), "user_ctl", itemKey, str)
-		}
-		if n >= 50 {
-			_, err := piple.Exec(context.Background())
-			if err != nil {
-				zap.L().Error("批量更新失败", zap.Any("err", err))
-			}
-			n, piple = 0, RedisIns().cli.Pipeline()
-		}
-		v.UpdateTime = 0
-	}
-	if n > 0 {
-		_, err := piple.Exec(context.Background())
-		if err != nil {
-			zap.L().Error("批量更新失败", zap.Any("err", err))
-		}
-	}
-	//清理缓存
-	for _, v := range delIds {
-		delete(s.sc, v)
-	}
-}
-
+// GameCacheMgr 缓存统一资金服务使用的奖池累计值，并定期持久化到 Redis。
 type GameCacheMgr struct {
-	lock          *sync.RWMutex
-	agents        map[int64]*AgentData //key agetId
-	ctrlThreshold decimal.Decimal      //单控阈值
-	gcmRand       *rand.Rand
+	lock   *sync.RWMutex
+	agents map[int64]*AgentData
 }
 
-func (gcm *GameCacheMgr) GetAgent(agentId int64) *AgentData {
+// GetAgent 获取代理缓存；首次访问时创建空缓存，具体累计值按需从 Redis 加载。
+func (gcm *GameCacheMgr) GetAgent(agentID int64) *AgentData {
 	gcm.lock.Lock()
 	defer gcm.lock.Unlock()
 
-	agent := gcm.agents[agentId]
+	agent := gcm.agents[agentID]
 	if agent == nil {
 		agent = &AgentData{
-			gameCache:  make(map[string]*Game),
-			userCache:  make(map[uint32]*User),
-			lock:       &sync.RWMutex{},
-			Id:         agentId,
-			RoundCache: make(map[string]*RoundItem),
+			lock:      &sync.RWMutex{},
+			Id:        agentID,
+			gameCache: make(map[string]*Game),
+			userCache: make(map[uint32]*User),
 		}
-		gcm.agents[agentId] = agent
+		gcm.agents[agentID] = agent
 	}
 	return agent
 }
 
-func (gcm *GameCacheMgr) GetUser(agentId, userId int64) *User {
-	agent := gcm.GetAgent(agentId)
-	if agent == nil {
-		return nil
-	}
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	return agent.GetUser(uint32(userId))
-}
-
-func (gcm *GameCacheMgr) poolType(pool decimal.Decimal, pv *config.Pool) (int, decimal.Decimal) {
-	if pool.LessThanOrEqual(decimal.Zero) {
-		return config.POOL_BREAK_DOWN, decimal.Zero
-	}
-	if pool.LessThanOrEqual(pv.Pool[1].Normal) {
-		return config.POOL_LOW, pv.Pool[1].MinRate
-	} else if pool.GreaterThan(pv.Pool[1].Normal) && pool.LessThanOrEqual(pv.Pool[1].Max) {
-		return config.POOL_NORMAL, pv.Pool[1].NormalRate
-	} else {
-		return config.POOL_HIGH, pv.Pool[1].MaxRate
-	}
-}
-
-func (gcm *GameCacheMgr) Complete(agentId int64, userId uint32, symbol string, bet, award, rate decimal.Decimal) {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
+// GetPool 返回扣除有效预留后的可用奖池：Pool = 有效下注 - 总赔付 - 税收 - 有效预留。
+func (gcm *GameCacheMgr) GetPool(agentID int64, symbol string) decimal.Decimal {
+	agent := gcm.GetAgent(agentID)
 	agent.lock.Lock()
 	defer agent.lock.Unlock()
 
 	game := agent.GetGame(symbol)
-	user := agent.GetUser(uint32(userId))
-	if user.IsTourist == 0 {
-		chips := award
-		//不会有返奖的情况，直接用bet计算税收
-		if award.LessThan(bet) {
-			//bet作为有效打码
-			chips = bet
-		}
-		game.TotalChips = game.TotalChips.Add(chips.Truncate(4))
-		//以有效下注计算水池后   可以直接放在下注的时候计算税收
-		// game.TotalRevenue = game.TotalRevenue.Add(bet.Mul(rate).Truncate(4))
-		game.UpdateTime = time.Now().Unix()
-		user.Count = user.Count.Add(decimal.NewFromInt(1))
-		user.TotalProfLoss = user.TotalProfLoss.Add(award)
-		user.UpdateTime = time.Now().Unix()
-	}
+	// 预留独立保存在 Redis，确保同一奖池的有效预留不会只存在某个实例内存中。
+	reserved := RedisIns().GetAgentReserved(agentID, symbol)
+	return availablePoolValue(game, reserved)
 }
 
-// 返还水池
-func (gcm *GameCacheMgr) ReturnPool(agentId int64, userId uint32, symbol string, delta decimal.Decimal) {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
+// poolValue 计算尚未扣除有效预留的基础奖池：BasePool = 有效下注 - 总赔付 - 税收。
+func poolValue(game *Game) decimal.Decimal {
+	return game.TotalEffectBet.Sub(game.TotalProfLoss).Sub(game.TotalRevenue)
+}
+
+// availablePoolValue 在基础奖池上扣除当前仍然有效的赔付预留。
+func availablePoolValue(game *Game, reserved decimal.Decimal) decimal.Decimal {
+	return poolValue(game).Sub(reserved)
+}
+
+func (gcm *GameCacheMgr) GetPlayerAccount(agentID, userID int64) string {
+	agent := gcm.GetAgent(agentID)
 	agent.lock.Lock()
 	defer agent.lock.Unlock()
 
+	return agent.GetUser(uint32(userID)).Account
+}
+
+// ApplyPoolChange 统一登记下注、赔付和退款引起的奖池增量。
+// betDelta 为正表示新增下注、为负表示退款；payoutDelta 为正表示玩家赔付。
+func (gcm *GameCacheMgr) ApplyPoolChange(
+	agentID int64,
+	userID uint32,
+	symbol string,
+	currencyType string,
+	recordID string,
+	betDelta decimal.Decimal,
+	payoutDelta decimal.Decimal,
+	revenueDelta decimal.Decimal,
+) {
+	agent := gcm.GetAgent(agentID)
+	agent.lock.Lock()
+	defer agent.lock.Unlock()
+
+	user := agent.GetUser(userID)
+	if user.IsTourist != 0 {
+		return
+	}
+
 	game := agent.GetGame(symbol)
-	user := agent.GetUser(uint32(userId))
-	game.TotalProfLoss = game.TotalProfLoss.Sub(delta)
+	before := poolValue(game)
+	game.TotalEffectBet = game.TotalEffectBet.Add(betDelta.Truncate(4))
+	// TotalProfLoss 只累计实际赔付，不混入下注或玩家净利润。
+	game.TotalProfLoss = game.TotalProfLoss.Add(payoutDelta.Truncate(4))
+	game.TotalRevenue = game.TotalRevenue.Add(revenueDelta.Truncate(4))
 	game.UpdateTime = time.Now().Unix()
-	user.TotalProfLoss = user.TotalProfLoss.Sub(delta)
+
+	user.TotalEffectBet = user.TotalEffectBet.Add(betDelta.Truncate(4))
+	user.UpdateTime = time.Now().Unix()
+	after := poolValue(game)
+	zap.L().Debug("pool change",
+		zap.Int64("agentId", agentID),
+		zap.Uint32("userId", userID),
+		zap.String("symbol", symbol),
+		zap.String("currencyType", currencyType),
+		zap.String("recordId", recordID),
+		zap.String("betDelta", betDelta.String()),
+		zap.String("payoutDelta", payoutDelta.String()),
+		zap.String("revenueDelta", revenueDelta.String()),
+		zap.String("before", before.String()),
+		zap.String("after", after.String()),
+	)
+}
+
+// TryReservePool 原子检查基础奖池并建立预留，返回 false 表示奖池不足或 Redis 操作失败。
+func (gcm *GameCacheMgr) TryReservePool(agentID int64, symbol string, amount decimal.Decimal) (bool, error) {
+	agent := gcm.GetAgent(agentID)
+	agent.lock.Lock()
+	defer agent.lock.Unlock()
+
+	basePool := poolValue(agent.GetGame(symbol))
+	return RedisIns().TryReserveAgentPool(agentID, symbol, basePool, amount)
+}
+
+// ReleasePoolReservation 释放指定牌局占用的有效预留，重复释放会被 Redis 拒绝。
+func (gcm *GameCacheMgr) ReleasePoolReservation(agentID int64, symbol string, amount decimal.Decimal) bool {
+	released, err := RedisIns().ReleaseAgentReserved(agentID, symbol, amount)
+	if err != nil {
+		zap.L().Error("释放奖池有效预留失败", zap.Int64("agentId", agentID), zap.String("symbol", symbol), zap.String("amount", amount.String()), zap.Error(err))
+		return false
+	}
+	if !released {
+		zap.L().Error("奖池有效预留不足，拒绝重复释放", zap.Int64("agentId", agentID), zap.String("symbol", symbol), zap.String("amount", amount.String()))
+	}
+	return released
+}
+
+// RecordSettlement 更新打码量、玩家局数和玩家累计返奖，不重复修改代理奖池。
+func (gcm *GameCacheMgr) RecordSettlement(agentID int64, userID uint32, symbol string, bet, payout decimal.Decimal) {
+	agent := gcm.GetAgent(agentID)
+	agent.lock.Lock()
+	defer agent.lock.Unlock()
+
+	user := agent.GetUser(userID)
+	if user.IsTourist != 0 {
+		return
+	}
+
+	game := agent.GetGame(symbol)
+	chips := payout
+	if payout.LessThan(bet) {
+		chips = bet
+	}
+	game.TotalChips = game.TotalChips.Add(chips.Truncate(4))
+	game.UpdateTime = time.Now().Unix()
+	user.Count = user.Count.Add(decimal.NewFromInt(1))
+	user.TotalProfLoss = user.TotalProfLoss.Add(payout.Truncate(4))
 	user.UpdateTime = time.Now().Unix()
 }
 
-// 下注
-func (gcm *GameCacheMgr) ChangePool(agentId int64, userId int32, symbol, currencyType, recordId string, bet, award, rate decimal.Decimal) bool {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	user := agent.GetUser(uint32(userId))
-	if user.IsTourist == 0 {
-		game := agent.GetGame(symbol)
-		before := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		//所有情况都需要扣除水池值 记录赔付
-		game.TotalProfLoss = game.TotalProfLoss.Add(award.Truncate(4))
-		//增加水池
-		game.TotalEffectBet = game.TotalEffectBet.Add(bet)
-		//累计税收
-		game.TotalRevenue = game.TotalRevenue.Add(bet.Mul(rate).Truncate(4))
-		//触发更新
-		game.UpdateTime = time.Now().Unix()
-		//记录玩家有效投注
-		user.TotalEffectBet = user.TotalEffectBet.Add(bet)
-		//记录玩家局数
-		// user.Count = user.Count.Add(decimal.NewFromInt(1))
-		user.UpdateTime = time.Now().Unix()
-		after := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		zap.L().Debug("Pool", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("recordId", recordId), zap.Any("userId", userId), zap.Any("currencyType", currencyType), zap.Any("bet", bet), zap.Any("award", award), zap.Any("before", before), zap.Any("after", after))
-	}
-	return true
-}
-
-// 下注
-func (gcm *GameCacheMgr) ChangePoolWithNoLock(agent *AgentData, user *User, game *Game, currencyType, recordId string, bet, award, revence decimal.Decimal) bool {
-	if user.IsTourist == 0 {
-		before := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		//所有情况都需要扣除水池值 记录赔付
-		game.TotalProfLoss = game.TotalProfLoss.Add(award.Truncate(4))
-		//增加水池
-		game.TotalEffectBet = game.TotalEffectBet.Add(bet)
-		//
-		game.TotalRevenue = game.TotalRevenue.Add(revence.Truncate(4))
-		//触发更新
-		game.UpdateTime = time.Now().Unix()
-		//记录玩家有效投注
-		user.TotalEffectBet = user.TotalEffectBet.Add(bet)
-		//记录玩家局数
-		// user.Count = user.Count.Add(decimal.NewFromInt(1))
-		user.UpdateTime = time.Now().Unix()
-		after := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		zap.L().Debug("Pool", zap.Any("agentId", agent.Id), zap.Any("symbol", game.Symbol), zap.Any("recordId", recordId), zap.Any("userId", user.UserId), zap.Any("currencyType", currencyType), zap.Any("bet", bet), zap.Any("award", award), zap.Any("before", before), zap.Any("after", after))
-	}
-	return true
-}
-
-func (gcm *GameCacheMgr) GetPool(agentId int64, symbol string) decimal.Decimal {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	game := agent.GetGame(symbol)
-	// zap.L().Debug("GetPool", zap.Any("agentId", agentId), zap.Any("symbol", symbol))
-	//水池计算方式  pool = 总亏损-总税收
-	return (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-}
-
-func (gcm *GameCacheMgr) CheckPoolWithChange(agentId int64, symbol, recordId, currencyType string, award, bet, revenue decimal.Decimal, userId uint32) bool {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	game := agent.GetGame(symbol)
-	//水池计算方式  pool = 总亏损-总税收
-	user := agent.GetUser(uint32(userId))
-	if user.IsTourist == 0 {
-		before := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		//所有情况都需要扣除水池值 记录赔付
-		game.TotalProfLoss = game.TotalProfLoss.Add(award.Truncate(4))
-		//增加水池
-		game.TotalEffectBet = game.TotalEffectBet.Add(bet)
-		//
-		game.TotalRevenue = game.TotalRevenue.Add(revenue.Truncate(4))
-		//触发更新
-		game.UpdateTime = time.Now().Unix()
-		//记录玩家有效投注
-		user.TotalEffectBet = user.TotalEffectBet.Add(bet)
-		//记录玩家局数
-		// user.Count = user.Count.Add(decimal.NewFromInt(1))
-		user.UpdateTime = time.Now().Unix()
-		after := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		zap.L().Debug("Pool", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("recordId", recordId), zap.Any("userId", userId), zap.Any("currencyType", currencyType), zap.Any("bet", bet), zap.Any("award", award), zap.Any("before", before), zap.Any("after", after))
-	}
-
-	return true
-}
-
-func (gcm *GameCacheMgr) CheckPoolWithOutBet(agentId int64, symbol, recordId, currencyType string, award, bet, revenue decimal.Decimal, userId uint32) bool {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	game := agent.GetGame(symbol)
-	//水池计算方式  pool = 总亏损-总税收
-	user := agent.GetUser(uint32(userId))
-	if user.IsTourist == 0 {
-		before := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		//所有情况都需要扣除水池值 记录赔付
-		game.TotalProfLoss = game.TotalProfLoss.Add(award.Truncate(4))
-		//增加水池
-		game.TotalEffectBet = game.TotalEffectBet.Add(bet)
-		//
-		game.TotalRevenue = game.TotalRevenue.Add(revenue.Truncate(4))
-		//触发更新
-		game.UpdateTime = time.Now().Unix()
-		//记录玩家有效投注
-		user.TotalEffectBet = user.TotalEffectBet.Add(bet)
-		//记录玩家局数
-		// user.Count = user.Count.Add(decimal.NewFromInt(1))
-		user.UpdateTime = time.Now().Unix()
-		after := (game.TotalEffectBet.Sub(game.TotalProfLoss)).Sub(game.TotalRevenue)
-		zap.L().Debug("Pool", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("recordId", recordId), zap.Any("userId", userId), zap.Any("currencyType", currencyType), zap.Any("bet", bet), zap.Any("award", award), zap.Any("before", before), zap.Any("after", after))
-	}
-
-	return true
-}
-
-// 保存注单信息
-func (gcm *GameCacheMgr) SaveRoundData(agentId int64, roundId string, maxPay decimal.Decimal, playerId uint32) {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	user := agent.GetUser(playerId)
-	if user != nil && user.IsTourist == 0 {
-		if ri := agent.RoundCache[roundId]; ri != nil {
-			zap.L().Error("重复缓存对局数据", zap.Any("data", ri))
-		} else {
-			agent.RoundCache[roundId] = &RoundItem{
-				MaxPay:  maxPay,
-				Over:    false,
-				AgentId: agentId,
-				RoundId: roundId,
-				Saved:   false,
-			}
-		}
-	}
-}
-
-func (gcm *GameCacheMgr) GetPlayerAccount(agentId, userId int64) string {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	user := agent.GetUser(uint32(userId))
-	if user != nil {
-		return user.Account
-	}
-	return ""
-}
-
-// 获取注单信息
-func (gcm *GameCacheMgr) GetRoundData(agentId int64, roundId string) *RoundItem {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.RLock()
-	defer agent.lock.RUnlock()
-
-	ri := agent.RoundCache[roundId]
-	if ri == nil {
-		zap.L().Debug("无预扣信息", zap.Any("agentId", agentId), zap.Any("roundId", roundId))
-	}
-	return ri
-}
-
-func (gcm *GameCacheMgr) FinishRoundData(agentId int64, roundId string) *RoundItem {
-	agent := gcm.GetAgent(agentId)
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	ri := agent.RoundCache[roundId]
-	if ri == nil {
-		return nil
-	}
-	ri.Over = true
-	copy := *ri
-	return &copy
-}
-
-/*
-平均下注金额A---统计周期【1、3、5、7天】【在统计周期内，用户历史投注的平均额度】；
-前端在每局开奖前传入开奖金额，若满足开奖则不干预；不满足则开奖失败
-按游戏分水池房间：低 、中 、 高水位；
-
-低水位：水池余额*百分比、A*100(可配置倍数)；取两者最小值
-正常水位：水池余额*百分比、A*500(可配置倍数)；取两者取最小值
-高水位：水池余额*百分比、A*1000(可配置倍数)；取两者取最小值
-
-单控时：水池余额*百分比、A*20(可配置倍数)；取两者最小值
-
-单控：
-自动单控
-手动单控
-单控数值：盈利金额大于设定值时对应的单控制数值；
-单控数值使用；
-触发进入单控后：总是按以下条件进行中奖条件判定：
-
-单控时：水池余额*百分比、A*20(可配置倍数)；取两者最小值。
-*/
-func (gcm *GameCacheMgr) Lottery(agentId int64, userId int32, pc *config.Pool, symbol, currencyType string, bet, award decimal.Decimal, roundId string) (decimal.Decimal, bool) {
-	agent := gcm.GetAgent(agentId)
-	//细分代理锁
-	agent.lock.Lock()
-	defer agent.lock.Unlock()
-
-	user := agent.GetUser(uint32(userId))
-	game := agent.GetGame(symbol)
-
-	revence := bet.Mul(pc.Pool[1].Revenue).Truncate(4)
-	pool := (bet.Add(game.TotalEffectBet).Sub(game.TotalProfLoss)).Sub(game.TotalRevenue.Add(revence)).Add(pc.Pool[1].Base)
-	//判断pool等级
-	t, r := gcm.poolType(pool, pc)
-	//计算可赔付值
-	//判断是否自动ctrl
-	if ac := config.CfgIns.GetAutoCtrl(user.TotalEffectBet, user.TotalProfLoss); ac != nil {
-		zap.L().Debug("Lottery:自动控制", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("ac", ac))
-		SCIns().addSingleCtrl(uint32(userId), ac.ControlRate, ac.Score, AUTO_CTRL)
-	}
-	zap.L().Debug("Lottery:当前水池值", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("pool", pool))
-	rate := decimal.Zero
-	if !user.TotalEffectBet.Equal(decimal.Zero) {
-		rate = (user.TotalProfLoss).Div(user.TotalEffectBet)
-	}
-	cItems := config.CfgIns.GetAwardOddsConfigWithProfitOdds(symbol, rate)
-	if cItems == nil {
-		//如果都不满足则获取默认配置
-		cItems = config.CfgIns.GetAwardOddsDefaultCtrlConfig(symbol)
-	}
-	//判断是否进入单控 1获取玩家单控信息 若有单控根据随机值判断是否进入单控 否则直接进入正常流程
-	ctrl := singleCtrl.getSingleCtrl(uint32(userId))
-	if ctrl != nil && !ctrl.IsDel {
-		randNum := SCIns().randInt(100)
-		if randNum <= int(ctrl.Rate.Abs().IntPart()) {
-			//进入单控
-			cItems = config.CfgIns.GetAwardOddsSingleCtrlConfig(symbol)
-			if cItems == nil {
-				zap.L().Debug("Lottery:获取单控配置信息失败", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("pool", pool))
-				return pool, false
-			}
-			singleCtrl.setSingleCtrlScore(uint32(userId), award)
-		}
-	}
-	item := cItems.PoolOdds[t]
-	//TODO:wg 新版不做概率限制
-	// n := gcm.gcmRand.Intn(100)
-	// if decimal.NewFromInt(int64(n)).GreaterThan(item.Odds) {
-	// 	zap.L().Debug("Lottery:开奖失败", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("n", n), zap.Any("开奖配置", item))
-	// 	return pool, false
-	// }
-	zap.L().Debug("Lottery:pool配置", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("rate", rate), zap.Any("水池状态", t), zap.Any("item", cItems))
-	//水池余额*百分比
-	p1 := pool.Mul(r)
-	var cnt = decimal.Zero
-	if user.Count.Equal(decimal.Zero) {
-		cnt = decimal.NewFromInt(1)
-	} else {
-		cnt = user.Count.Add(decimal.NewFromInt(1))
-	}
-	//平均值*倍数
-	p2 := (user.TotalEffectBet.Div(cnt)).Mul(item.M)
-	//p1、p2取最小值
-	p := p1
-	if p1.GreaterThan(p2) {
-		p = p2
-		zap.L().Debug("Lottery:使用平均值", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("可赔付", p), zap.Any("总投注", user.TotalEffectBet), zap.Any("投注数量", user.Count), zap.Any("配置详情", item))
-	} else {
-		zap.L().Debug("Lottery:使用水池值", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("可赔付", p), zap.Any("总投注", user.TotalEffectBet), zap.Any("总盈亏", game.TotalProfLoss), zap.Any("总税收", game.TotalRevenue), zap.Any("基数", pc.Pool[1].Base), zap.Any("投注数量", user.Count), zap.Any("倍数", item.M))
-	}
-	//是否够陪
-	if p.LessThan(award) {
-		zap.L().Debug("Lottery:赔付失败", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("可赔付", p), zap.Any("返奖值", award))
-		return pool, false
-	}
-	zap.L().Debug("Lottery:赔付成功", zap.Any("agentId", agentId), zap.Any("symbol", symbol), zap.Any("roundId", roundId), zap.Any("playerId", userId), zap.Any("可赔付", p), zap.Any("返奖值", award))
-
-	CacheIns().ChangePoolWithNoLock(agent, user, game, currencyType, roundId, bet, award, revence)
-
-	return pool, true
-}
-
+// GetAgentChanges 收集尚未持久化的玩家和奖池统计。
 func GetAgentChanges() ([]*User, []*Game) {
 	gameCache.lock.RLock()
 	defer gameCache.lock.RUnlock()
@@ -621,14 +239,14 @@ func GetAgentChanges() ([]*User, []*Game) {
 	games := make([]*Game, 0, 64)
 	for _, agent := range gameCache.agents {
 		agent.lock.RLock()
-		for _, item := range agent.gameCache {
-			if item.UpdateTime > 0 {
-				games = append(games, item)
+		for _, game := range agent.gameCache {
+			if game.UpdateTime > 0 {
+				games = append(games, game)
 			}
 		}
-		for _, item := range agent.userCache {
-			if item.UpdateTime > 0 {
-				users = append(users, item)
+		for _, user := range agent.userCache {
+			if user.UpdateTime > 0 {
+				users = append(users, user)
 			}
 		}
 		agent.lock.RUnlock()
@@ -636,304 +254,110 @@ func GetAgentChanges() ([]*User, []*Game) {
 	return users, games
 }
 
-func ResetPool(data interface{}) {
+// ResetPool 清空内存和 Redis 中的代理奖池累计值。
+func ResetPool(_ interface{}) {
 	gameCache.lock.Lock()
 	defer gameCache.lock.Unlock()
 
 	for _, agent := range gameCache.agents {
-		for _, item := range agent.gameCache {
-			item.TotalChips = decimal.Zero
-			item.TotalEffectBet = decimal.Zero
-			item.TotalProfLoss = decimal.Zero
-			item.TotalRevenue = decimal.Zero
+		agent.lock.Lock()
+		for _, game := range agent.gameCache {
+			game.TotalChips = decimal.Zero
+			game.TotalEffectBet = decimal.Zero
+			game.TotalProfLoss = decimal.Zero
+			game.TotalRevenue = decimal.Zero
 		}
+		agent.lock.Unlock()
 	}
 
-	piple := RedisIns().cli.Pipeline()
-	zap.L().Debug("清理水池开始")
-	piple.Del(context.Background(), "agent_effect_data")
-	piple.Del(context.Background(), "agent_chips_data")
-	piple.Del(context.Background(), "agent_revenue_data")
-	piple.Del(context.Background(), "agent_profitLoss_data")
-	_, err := piple.Exec(context.Background())
-	if err != nil {
-		zap.L().Error("Redis重置pool失败!", zap.Any("err", err))
+	pipeline := RedisIns().cli.Pipeline()
+	pipeline.Del(context.Background(), "agent_effect_data")
+	pipeline.Del(context.Background(), "agent_chips_data")
+	pipeline.Del(context.Background(), "agent_revenue_data")
+	pipeline.Del(context.Background(), "agent_profitLoss_data")
+	pipeline.Del(context.Background(), "agent_reserved_data")
+	if _, err := pipeline.Exec(context.Background()); err != nil {
+		zap.L().Error("reset pool failed", zap.Error(err))
 	}
-	zap.L().Debug("清理水池结束")
 }
 
-// 获取单控阈值
-func getSingleCtrlThreshold() {
-	value, err := RedisIns().Get("single_ctrl_threshold")
-	if err != nil {
+// SaveAgentData 批量持久化 CNY 奖池累计值，二级键格式为 agentId_symbol_level。
+func SaveAgentData(games []*Game) {
+	pipeline := RedisIns().cli.Pipeline()
+	queued := 0
+	for _, game := range games {
+		if game.UpdateTime <= 0 {
+			continue
+		}
+		key := fmt.Sprintf("%d_%s", game.AgentId, game.Symbol)
+		pipeline.ZAdd(context.Background(), "agent_effect_data", redis.Z{Score: game.TotalEffectBet.InexactFloat64(), Member: key})
+		pipeline.ZAdd(context.Background(), "agent_chips_data", redis.Z{Score: game.TotalChips.InexactFloat64(), Member: key})
+		pipeline.ZAdd(context.Background(), "agent_profitLoss_data", redis.Z{Score: game.TotalProfLoss.InexactFloat64(), Member: key})
+		pipeline.ZAdd(context.Background(), "agent_revenue_data", redis.Z{Score: game.TotalRevenue.InexactFloat64(), Member: key})
+		game.UpdateTime = 0
+		queued++
+		if queued >= 100 {
+			execPipeline(pipeline, "save agent finance data")
+			pipeline = RedisIns().cli.Pipeline()
+			queued = 0
+		}
+	}
+	if queued > 0 {
+		execPipeline(pipeline, "save agent finance data")
+	}
+}
+
+// SaveUserData 批量持久化玩家有效下注、返奖和局数统计。
+func SaveUserData(users []*User) {
+	pipeline := RedisIns().cli.Pipeline()
+	queued := 0
+	for _, user := range users {
+		if user.UpdateTime <= 0 {
+			continue
+		}
+		key := fmt.Sprintf("%d", user.UserId)
+		pipeline.ZAdd(context.Background(), "userTotalEffBet", redis.Z{Score: user.TotalEffectBet.InexactFloat64(), Member: key})
+		pipeline.ZAdd(context.Background(), "userTotalProfLoss", redis.Z{Score: user.TotalProfLoss.InexactFloat64(), Member: key})
+		pipeline.ZAdd(context.Background(), "userBetCount", redis.Z{Score: user.Count.InexactFloat64(), Member: key})
+		user.UpdateTime = 0
+		queued++
+		if queued >= 100 {
+			execPipeline(pipeline, "save user finance data")
+			pipeline = RedisIns().cli.Pipeline()
+			queued = 0
+		}
+	}
+	if queued > 0 {
+		execPipeline(pipeline, "save user finance data")
+	}
+}
+
+func execPipeline(pipeline redis.Pipeliner, operation string) {
+	if _, err := pipeline.Exec(context.Background()); err != nil {
+		zap.L().Error(operation+" failed", zap.Error(err))
+	}
+}
+
+// CacheInit 初始化奖池缓存，并启动统计数据定时落地任务。
+func CacheInit() {
+	if gameCache != nil {
 		return
 	}
-	t, _ := decimal.NewFromString(value)
-	gameCache.ctrlThreshold = t
-	zap.L().Debug("获取单控阈值", zap.Any("value", t))
-}
-
-func SaveAgentData(games []*Game) {
-	piple, n := RedisIns().cli.Pipeline(), 0
-	for _, item := range games {
-		zap.L().Debug("定时缓存代理数据", zap.Any("item", item))
-		if item.UpdateTime > 0 {
-			key := fmt.Sprintf("%d_%s", item.AgentId, item.Symbol)
-			n++
-			piple.ZAdd(context.Background(), "agent_effect_data", redis.Z{Score: item.TotalEffectBet.InexactFloat64(), Member: key})
-			piple.ZAdd(context.Background(), "agent_chips_data", redis.Z{Score: item.TotalChips.InexactFloat64(), Member: key})
-			piple.ZAdd(context.Background(), "agent_profitLoss_data", redis.Z{Score: item.TotalProfLoss.InexactFloat64(), Member: key})
-			piple.ZAdd(context.Background(), "agent_revenue_data", redis.Z{Score: item.TotalRevenue.InexactFloat64(), Member: key})
-			item.UpdateTime = 0
-		}
-		if n >= 100 {
-			_, err := piple.Exec(context.Background())
-			if err != nil {
-				zap.L().Error("定时缓存代理游戏统计数据失败", zap.Any("error", err))
-			}
-			n = 0
-			piple = redisDao.cli.Pipeline()
-		}
+	gameCache = &GameCacheMgr{
+		lock:   &sync.RWMutex{},
+		agents: make(map[int64]*AgentData),
 	}
-	if n > 0 {
-		_, err := piple.Exec(context.Background())
-		if err != nil {
-			zap.L().Error("定时缓存代理游戏统计数据失败", zap.Any("error", err))
-		}
-	}
-}
-
-func SaveUserData(users []*User) {
-	piple, n := RedisIns().cli.Pipeline(), 0
-	for _, item := range users {
-		zap.L().Debug("定时缓存玩家数据", zap.Any("item", item))
-		if item.UpdateTime > 0 {
-			n++
-			k := fmt.Sprintf("%d", item.UserId)
-			piple.ZAdd(context.Background(), "userTotalEffBet", redis.Z{Score: item.TotalEffectBet.InexactFloat64(), Member: k})
-			piple.ZAdd(context.Background(), "userTotalProfLoss", redis.Z{Score: item.TotalProfLoss.InexactFloat64(), Member: k})
-			piple.ZAdd(context.Background(), "userBetCount", redis.Z{Score: item.Count.InexactFloat64(), Member: k})
-			item.UpdateTime = 0
-		}
-		if n >= 100 {
-			_, err := piple.Exec(context.Background())
-			if err != nil {
-				zap.L().Error("定时缓存玩家游戏统计数据失败", zap.Any("error", err))
-			}
-			n = 0
-			piple = redisDao.cli.Pipeline()
-		}
-	}
-	if n > 0 {
-		_, err := piple.Exec(context.Background())
-		if err != nil {
-			zap.L().Error("定时缓存玩家游戏统计数据失败", zap.Any("error", err))
-		}
-	}
-}
-
-// 加载对局数据
-func LoadAllRoundData() {
-	values := make([]string, 0, 128)
-	iter := RedisIns().cli.HScan(context.Background(), "rund_records", 0, "*", 100).Iterator()
-	for iter.Next(context.Background()) {
-		data := iter.Val()
-		values = append(values, data)
-	}
-	if err := iter.Err(); err != nil {
-		zap.L().Fatal("加载对局数据失败", zap.Any("err", err))
-	}
-	for i := 1; i < len(values); i += 2 {
-		zap.L().Debug("玩家注单缓存信息", zap.Any("data", values[i]))
-		ri := &RoundItem{}
-		err := jsoniter.UnmarshalFromString(values[i], ri)
-		if err != nil {
-			zap.L().Fatal("玩家注单缓存信息", zap.Any("data", values[i]), zap.Any("err", err))
-		} else {
-			agent := gameCache.GetAgent(ri.AgentId)
-			ri.Saved = true
-			agent.RoundCache[ri.RoundId] = ri
-		}
-	}
-}
-
-// 同步注单数据信息
-func SyncRoundData() {
 	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				zap.L().Error("panic", zap.Any("error", err))
-			}
-		}()
-		ticker := time.NewTicker(time.Second * 60 * 1)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
 		for range ticker.C {
-			zap.L().Debug("开始注单数据同步")
-			rc := make([]*RoundItem, 0, 128)
-			ro := make([]*RoundItem, 0, 128)
-			gameCache.lock.Lock()
-			for _, agent := range gameCache.agents {
-				for _, item := range agent.RoundCache {
-					if !item.Saved {
-						rc = append(rc, item)
-					}
-					if item.Over {
-						ro = append(ro, item)
-					}
-				}
-			}
-			gameCache.lock.Unlock()
-			n, ok := 0, true
-			piple := RedisIns().cli.Pipeline()
-			for _, v := range rc {
-				n++
-				str, _ := jsoniter.MarshalToString(v)
-				piple.HSet(context.Background(), "rund_records", v.RoundId, str)
-				if n >= 50 {
-					_, err := piple.Exec(context.Background())
-					if err != nil {
-						if err != redis.Nil {
-							zap.L().Fatal("获取rund_records失败", zap.Any("err", err))
-						} else {
-							return
-						}
-						ok = false
-						zap.L().Error("批量保存注单信息失败，稍后重试", zap.Any("err", err))
-						break
-					} else {
-						piple = redisDao.cli.Pipeline()
-						n = 0
-					}
-				}
-			}
-			if n > 0 {
-				_, err := piple.Exec(context.Background())
-				if err != nil {
-					ok = false
-					zap.L().Error("批量保存注单信息失败，稍后重试", zap.Any("err", err))
-				}
-			}
-			if ok {
-				for _, v := range rc {
-					v.Saved = true
-				}
-			}
-			// 删除已经完成预扣及返还的注单信息
-			n, ok = 0, true
-			piple = RedisIns().cli.Pipeline()
-			for _, v := range ro {
-				n++
-				piple.HDel(context.Background(), "rund_records", v.RoundId)
-				if n >= 50 {
-					_, err := piple.Exec(context.Background())
-					if err != nil {
-						if err != redis.Nil {
-							zap.L().Fatal("获取配置失败", zap.Any("err", err))
-						}
-						ok = false
-						zap.L().Error("批量保存注单信息失败，稍后重试", zap.Any("err", err))
-						break
-					} else {
-						piple = redisDao.cli.Pipeline()
-						n = 0
-					}
-				}
-			}
-			if n > 0 {
-				_, err := piple.Exec(context.Background())
-				if err != nil {
-					ok = false
-					zap.L().Error("批量保存注单信息失败，稍后重试", zap.Any("err", err))
-				}
-			}
-			if ok {
-				for _, v := range ro {
-					agent := gameCache.GetAgent(v.AgentId)
-					if agent != nil {
-						agent.lock.Lock()
-						delete(agent.RoundCache, v.RoundId)
-						agent.lock.Unlock()
-					}
-				}
-			}
-			zap.L().Debug("完成注单数据同步")
+			users, games := GetAgentChanges()
+			SaveAgentData(games)
+			SaveUserData(users)
 		}
 	}()
 }
 
-// 初始化缓存
-func CahceInit() {
-	//游戏数据加载
-	if gameCache == nil {
-		gameCache = &GameCacheMgr{
-			lock:          &sync.RWMutex{},
-			agents:        make(map[int64]*AgentData),
-			ctrlThreshold: decimal.NewFromInt(100000),
-			gcmRand:       rand.New(rand.NewSource(time.Now().Unix())),
-		}
-		getSingleCtrlThreshold() //更新单控阈值
-		go func() {
-			defer func() {
-				if err := recover(); err != nil {
-					zap.L().Error("panic", zap.Any("err", err))
-				}
-			}()
-			ticker := time.NewTicker(30 * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				users, games := GetAgentChanges()
-				SaveAgentData(games)     //定时保存代理数据
-				SaveUserData(users)      //定时保存玩家数据
-				getSingleCtrlThreshold() //更新单控阈值
-			}
-		}()
-	}
-	//单控数据加载
-	if singleCtrl == nil {
-		singleCtrl = &SingleCtrlMgr{
-			lock: &sync.RWMutex{},
-			r:    rand.New(rand.NewSource(time.Now().UnixNano())),
-			sc:   make(map[uint32]*Ctrl),
-		}
-		//加载所有的控制信息
-		values := make([]string, 0, 128)
-		iter := RedisIns().cli.HScan(context.Background(), "user_ctl", 0, "*", 100).Iterator()
-		for iter.Next(context.Background()) {
-			data := iter.Val()
-			values = append(values, data)
-		}
-		if err := iter.Err(); err != nil {
-			zap.L().Fatal("加载控制信息失败", zap.Any("err", err))
-		}
-		for i := 1; i < len(values); i += 2 {
-			zap.L().Debug("玩家控制信息数据", zap.Any("data", values[i]))
-			ctl := &Ctrl{}
-			err := jsoniter.UnmarshalFromString(values[i], ctl)
-			if err != nil {
-				zap.L().Fatal("解析控制信息失败", zap.Any("data", values[i]), zap.Any("err", err))
-			} else {
-				singleCtrl.sc[ctl.UserId] = ctl
-			}
-		}
-		go func() {
-			defer func() {
-				if err := recover(); err != nil {
-					zap.L().Error("panic", zap.Any("err", err))
-				}
-			}()
-			ticker := time.NewTicker(5 * 60 * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				//定时缓存玩家单控信息
-				singleCtrl.flushDB()
-			}
-		}()
-	}
-}
-
 func CacheIns() *GameCacheMgr {
 	return gameCache
-}
-
-func SCIns() *SingleCtrlMgr {
-	return singleCtrl
 }

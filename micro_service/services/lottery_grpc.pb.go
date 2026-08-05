@@ -19,114 +19,30 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LotteryService_PoolAmountResult_FullMethodName            = "/lottery.LotteryService/PoolAmountResult"
-	LotteryService_SlotsLottery_FullMethodName                = "/lottery.LotteryService/SlotsLottery"
-	LotteryService_QKLDoBetInit_FullMethodName                = "/lottery.LotteryService/QKLDoBetInit"
-	LotteryService_QKLDoBetMore_FullMethodName                = "/lottery.LotteryService/QKLDoBetMore"
-	LotteryService_QKLDoBetContinue_FullMethodName            = "/lottery.LotteryService/QKLDoBetContinue"
-	LotteryService_QKLDoBetSettle_FullMethodName              = "/lottery.LotteryService/QKLDoBetSettle"
-	LotteryService_QKLDoBetSettleWithCheck_FullMethodName     = "/lottery.LotteryService/QKLDoBetSettleWithCheck"
-	LotteryService_QKLDoBetStop_FullMethodName                = "/lottery.LotteryService/QKLDoBetStop"
-	LotteryService_QKLDoBet_FullMethodName                    = "/lottery.LotteryService/QKLDoBet"
-	LotteryService_QKLDoBetMultiplayerGame_FullMethodName     = "/lottery.LotteryService/QKLDoBetMultiplayerGame"
-	LotteryService_QKLCancelBetMultiplayerGame_FullMethodName = "/lottery.LotteryService/QKLCancelBetMultiplayerGame"
-	LotteryService_QKLDoMultiplayerCashout_FullMethodName     = "/lottery.LotteryService/QKLDoMultiplayerCashout"
-	LotteryService_QKLSaveMultiplayerRecords_FullMethodName   = "/lottery.LotteryService/QKLSaveMultiplayerRecords"
-	LotteryService_QKLSettleMultiplayer_FullMethodName        = "/lottery.LotteryService/QKLSettleMultiplayer"
+	LotteryService_Bet_FullMethodName                  = "/lottery.LotteryService/Bet"
+	LotteryService_PrePay_FullMethodName               = "/lottery.LotteryService/PrePay"
+	LotteryService_RenewPrePay_FullMethodName          = "/lottery.LotteryService/RenewPrePay"
+	LotteryService_ReleasePrePay_FullMethodName        = "/lottery.LotteryService/ReleasePrePay"
+	LotteryService_Settlement_FullMethodName           = "/lottery.LotteryService/Settlement"
+	LotteryService_GetRoundFinanceState_FullMethodName = "/lottery.LotteryService/GetRoundFinanceState"
 )
 
 // LotteryServiceClient is the client API for LotteryService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LotteryServiceClient interface {
-	// 获取水池数据
-	PoolAmountResult(ctx context.Context, in *PoolAmountResultReq, opts ...grpc.CallOption) (*PoolAmountResultResp, error)
-	// Lottery
-	SlotsLottery(ctx context.Context, in *SlotsLotteryReq, opts ...grpc.CallOption) (*SlotsLotteryResp, error)
-	// *
-	// 初始化下注
-	//
-	// 流程：
-	// 1. 扣除用户余额
-	// 2. 保存游戏状态到 Redis（extra 中包含 initialBet）
-	QKLDoBetInit(ctx context.Context, in *QKLDoBetInitReq, opts ...grpc.CallOption) (*QKLDoBetInitResp, error)
-	// *
-	// 加注
-	//
-	// 流程：
-	// 1. 从 pool 扣除 bet 金额（加注）
-	// 2. 扣除用户余额
-	// 3. 保存游戏状态到 Redis（extra 中包含 initialBet）
-	//
-	// 与 doBetInit 逻辑相同，只是用于区分不同的业务场景
-	QKLDoBetMore(ctx context.Context, in *QKLDoBetMoreReq, opts ...grpc.CallOption) (*QKLDoBetMoreResp, error)
-	// *
-	// 继续下注检查
-	//
-	// 流程：
-	// 1. 检查 pool 是否有足够资金赔付 deltaWin, 多次win的，deltaWin = lastWin - previousWin
-	// 2. 返回是否可以赔付
-	QKLDoBetContinue(ctx context.Context, in *QKLDoBetContinueReq, opts ...grpc.CallOption) (*QKLDoBetContinueResp, error)
-	// *
-	// 结算
-	//
-	// 流程：
-	//   - 如果 hit=true（玩家赢了）：
-	//     返还 win 到用户余额
-	//
-	// - 如果 hit=false（玩家输了）：
-	//
-	//  1. 将之前从 pool 扣除的 bet 返回到 pool
-	//
-	//  2. 不返还任何金额到用户余额
-	//
-	//     结算，可能不需要 result 和extra 的持久化，可以 传入 null undefined 或者不传入
-	QKLDoBetSettle(ctx context.Context, in *QKLDoBetSettleReq, opts ...grpc.CallOption) (*QKLDoBetSettleResp, error)
-	// *
-	// 结算前检查并结算（支持平局）
-	//
-	// 流程：
-	// 1. 只有 win 时才检查 pool 是否足够，够则扣除（lose 不需要，draw 直接扣除）
-	// 2. 如果 pool 不足，返回错误
-	// 3. 根据输赢进行结算：
-	//   - hit='win': 返还 win 到用户余额（win 已包含 initBet，pool 已扣除）
-	//   - hit='lose': 不返还用户，pool 也不变动
-	//   - hit='draw': 返还 initBet 到用户余额，从 pool 扣除 initBet（不检查 pool 是否够）
-	QKLDoBetSettleWithCheck(ctx context.Context, in *QKLDoBetSettleWithCheckReq, opts ...grpc.CallOption) (*QKLDoBetSettleWithCheckResp, error)
-	// *
-	// 终止游戏，没有没赢，返回初始下注金额
-	// 流程：
-	// 1. 将下注金额返还给用户（相当于没玩）
-	// 2. 不记录游戏结果
-	QKLDoBetStop(ctx context.Context, in *QKLDoBetStopReq, opts ...grpc.CallOption) (*QKLDoBetStopResp, error)
-	// *
-	// 一次性行下注
-	QKLDoBet(ctx context.Context, in *QKLDoBetReq, opts ...grpc.CallOption) (*QKLDoBetResp, error)
-	// *
-	// 多人游戏下注 - 开发环境（包含 recordId）
-	QKLDoBetMultiplayerGame(ctx context.Context, in *QKLDoBetMultiplayerGameReq, opts ...grpc.CallOption) (*QKLDoBetMultiplayerGameResp, error)
-	// *
-	// 多人游戏取消下注 - 开发环境
-	QKLCancelBetMultiplayerGame(ctx context.Context, in *QKLCancelBetMultiplayerGameReq, opts ...grpc.CallOption) (*QKLCancelBetMultiplayerGameResp, error)
-	// *
-	// 百人游戏提现/赢钱 - 开发环境
-	//
-	// 流程：
-	// 1. 从 pool 扣除 win 金额
-	// 2. 返还 win 到用户余额
-	QKLDoMultiplayerCashout(ctx context.Context, in *QKLDoMultiplayerCashoutReq, opts ...grpc.CallOption) (*QKLDoMultiplayerCashoutResp, error)
-	// *
-	// 保存多人游戏记录 - 开发环境（空实现）
-	QKLSaveMultiplayerRecords(ctx context.Context, in *QKLSaveMultiplayerRecordsReq, opts ...grpc.CallOption) (*QKLSaveMultiplayerRecordsResp, error)
-	// *
-	// 百人游戏结算 - 开发环境
-	//
-	// 流程：
-	// 1. 遍历 dispatchRewardGold 为正的 GameRecord 数组
-	// 2. 累计 totalwin，从 pool 扣除
-	// 3. 根据 userId，设置用户的金币 win
-	// 4. 生成环境还需要记录结算结果到数据库，开发环境不处理
-	QKLSettleMultiplayer(ctx context.Context, in *QKLSettleMultiplayerReq, opts ...grpc.CallOption) (*QKLSettleMultiplayerResp, error)
+	// 扣除玩家余额并登记本局下注；同一 roundId + betId 重试不会重复扣款。
+	Bet(ctx context.Context, in *BetRequest, opts ...grpc.CallOption) (*BetResponse, error)
+	// 根据冻结后的下注摘要和候选结果，申请奖池赔付预留。
+	PrePay(ctx context.Context, in *PrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error)
+	// 在预留到期前续租，防止长牌局的赔付额度被自动释放。
+	RenewPrePay(ctx context.Context, in *RenewPrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error)
+	// 在结果公开前主动释放赔付预留，不退还玩家下注。
+	ReleasePrePay(ctx context.Context, in *ReleasePrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error)
+	// 批量结算本局全部真人玩家，或按 VOID_REFUND 原路退回全部下注。
+	Settlement(ctx context.Context, in *SettlementRequest, opts ...grpc.CallOption) (*SettlementResponse, error)
+	// 查询本局资金状态，用于 RPC 超时、重连和服务迁移后的恢复。
+	GetRoundFinanceState(ctx context.Context, in *GetRoundFinanceStateReq, opts ...grpc.CallOption) (*GetRoundFinanceStateResp, error)
 }
 
 type lotteryServiceClient struct {
@@ -137,140 +53,60 @@ func NewLotteryServiceClient(cc grpc.ClientConnInterface) LotteryServiceClient {
 	return &lotteryServiceClient{cc}
 }
 
-func (c *lotteryServiceClient) PoolAmountResult(ctx context.Context, in *PoolAmountResultReq, opts ...grpc.CallOption) (*PoolAmountResultResp, error) {
+func (c *lotteryServiceClient) Bet(ctx context.Context, in *BetRequest, opts ...grpc.CallOption) (*BetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PoolAmountResultResp)
-	err := c.cc.Invoke(ctx, LotteryService_PoolAmountResult_FullMethodName, in, out, cOpts...)
+	out := new(BetResponse)
+	err := c.cc.Invoke(ctx, LotteryService_Bet_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lotteryServiceClient) SlotsLottery(ctx context.Context, in *SlotsLotteryReq, opts ...grpc.CallOption) (*SlotsLotteryResp, error) {
+func (c *lotteryServiceClient) PrePay(ctx context.Context, in *PrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SlotsLotteryResp)
-	err := c.cc.Invoke(ctx, LotteryService_SlotsLottery_FullMethodName, in, out, cOpts...)
+	out := new(PrePayResponse)
+	err := c.cc.Invoke(ctx, LotteryService_PrePay_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lotteryServiceClient) QKLDoBetInit(ctx context.Context, in *QKLDoBetInitReq, opts ...grpc.CallOption) (*QKLDoBetInitResp, error) {
+func (c *lotteryServiceClient) RenewPrePay(ctx context.Context, in *RenewPrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetInitResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBetInit_FullMethodName, in, out, cOpts...)
+	out := new(PrePayResponse)
+	err := c.cc.Invoke(ctx, LotteryService_RenewPrePay_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lotteryServiceClient) QKLDoBetMore(ctx context.Context, in *QKLDoBetMoreReq, opts ...grpc.CallOption) (*QKLDoBetMoreResp, error) {
+func (c *lotteryServiceClient) ReleasePrePay(ctx context.Context, in *ReleasePrePayRequest, opts ...grpc.CallOption) (*PrePayResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetMoreResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBetMore_FullMethodName, in, out, cOpts...)
+	out := new(PrePayResponse)
+	err := c.cc.Invoke(ctx, LotteryService_ReleasePrePay_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lotteryServiceClient) QKLDoBetContinue(ctx context.Context, in *QKLDoBetContinueReq, opts ...grpc.CallOption) (*QKLDoBetContinueResp, error) {
+func (c *lotteryServiceClient) Settlement(ctx context.Context, in *SettlementRequest, opts ...grpc.CallOption) (*SettlementResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetContinueResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBetContinue_FullMethodName, in, out, cOpts...)
+	out := new(SettlementResponse)
+	err := c.cc.Invoke(ctx, LotteryService_Settlement_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lotteryServiceClient) QKLDoBetSettle(ctx context.Context, in *QKLDoBetSettleReq, opts ...grpc.CallOption) (*QKLDoBetSettleResp, error) {
+func (c *lotteryServiceClient) GetRoundFinanceState(ctx context.Context, in *GetRoundFinanceStateReq, opts ...grpc.CallOption) (*GetRoundFinanceStateResp, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetSettleResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBetSettle_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLDoBetSettleWithCheck(ctx context.Context, in *QKLDoBetSettleWithCheckReq, opts ...grpc.CallOption) (*QKLDoBetSettleWithCheckResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetSettleWithCheckResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBetSettleWithCheck_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLDoBetStop(ctx context.Context, in *QKLDoBetStopReq, opts ...grpc.CallOption) (*QKLDoBetStopResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetStopResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBetStop_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLDoBet(ctx context.Context, in *QKLDoBetReq, opts ...grpc.CallOption) (*QKLDoBetResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBet_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLDoBetMultiplayerGame(ctx context.Context, in *QKLDoBetMultiplayerGameReq, opts ...grpc.CallOption) (*QKLDoBetMultiplayerGameResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoBetMultiplayerGameResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoBetMultiplayerGame_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLCancelBetMultiplayerGame(ctx context.Context, in *QKLCancelBetMultiplayerGameReq, opts ...grpc.CallOption) (*QKLCancelBetMultiplayerGameResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLCancelBetMultiplayerGameResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLCancelBetMultiplayerGame_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLDoMultiplayerCashout(ctx context.Context, in *QKLDoMultiplayerCashoutReq, opts ...grpc.CallOption) (*QKLDoMultiplayerCashoutResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLDoMultiplayerCashoutResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLDoMultiplayerCashout_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLSaveMultiplayerRecords(ctx context.Context, in *QKLSaveMultiplayerRecordsReq, opts ...grpc.CallOption) (*QKLSaveMultiplayerRecordsResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLSaveMultiplayerRecordsResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLSaveMultiplayerRecords_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lotteryServiceClient) QKLSettleMultiplayer(ctx context.Context, in *QKLSettleMultiplayerReq, opts ...grpc.CallOption) (*QKLSettleMultiplayerResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QKLSettleMultiplayerResp)
-	err := c.cc.Invoke(ctx, LotteryService_QKLSettleMultiplayer_FullMethodName, in, out, cOpts...)
+	out := new(GetRoundFinanceStateResp)
+	err := c.cc.Invoke(ctx, LotteryService_GetRoundFinanceState_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -281,94 +117,18 @@ func (c *lotteryServiceClient) QKLSettleMultiplayer(ctx context.Context, in *QKL
 // All implementations must embed UnimplementedLotteryServiceServer
 // for forward compatibility.
 type LotteryServiceServer interface {
-	// 获取水池数据
-	PoolAmountResult(context.Context, *PoolAmountResultReq) (*PoolAmountResultResp, error)
-	// Lottery
-	SlotsLottery(context.Context, *SlotsLotteryReq) (*SlotsLotteryResp, error)
-	// *
-	// 初始化下注
-	//
-	// 流程：
-	// 1. 扣除用户余额
-	// 2. 保存游戏状态到 Redis（extra 中包含 initialBet）
-	QKLDoBetInit(context.Context, *QKLDoBetInitReq) (*QKLDoBetInitResp, error)
-	// *
-	// 加注
-	//
-	// 流程：
-	// 1. 从 pool 扣除 bet 金额（加注）
-	// 2. 扣除用户余额
-	// 3. 保存游戏状态到 Redis（extra 中包含 initialBet）
-	//
-	// 与 doBetInit 逻辑相同，只是用于区分不同的业务场景
-	QKLDoBetMore(context.Context, *QKLDoBetMoreReq) (*QKLDoBetMoreResp, error)
-	// *
-	// 继续下注检查
-	//
-	// 流程：
-	// 1. 检查 pool 是否有足够资金赔付 deltaWin, 多次win的，deltaWin = lastWin - previousWin
-	// 2. 返回是否可以赔付
-	QKLDoBetContinue(context.Context, *QKLDoBetContinueReq) (*QKLDoBetContinueResp, error)
-	// *
-	// 结算
-	//
-	// 流程：
-	//   - 如果 hit=true（玩家赢了）：
-	//     返还 win 到用户余额
-	//
-	// - 如果 hit=false（玩家输了）：
-	//
-	//  1. 将之前从 pool 扣除的 bet 返回到 pool
-	//
-	//  2. 不返还任何金额到用户余额
-	//
-	//     结算，可能不需要 result 和extra 的持久化，可以 传入 null undefined 或者不传入
-	QKLDoBetSettle(context.Context, *QKLDoBetSettleReq) (*QKLDoBetSettleResp, error)
-	// *
-	// 结算前检查并结算（支持平局）
-	//
-	// 流程：
-	// 1. 只有 win 时才检查 pool 是否足够，够则扣除（lose 不需要，draw 直接扣除）
-	// 2. 如果 pool 不足，返回错误
-	// 3. 根据输赢进行结算：
-	//   - hit='win': 返还 win 到用户余额（win 已包含 initBet，pool 已扣除）
-	//   - hit='lose': 不返还用户，pool 也不变动
-	//   - hit='draw': 返还 initBet 到用户余额，从 pool 扣除 initBet（不检查 pool 是否够）
-	QKLDoBetSettleWithCheck(context.Context, *QKLDoBetSettleWithCheckReq) (*QKLDoBetSettleWithCheckResp, error)
-	// *
-	// 终止游戏，没有没赢，返回初始下注金额
-	// 流程：
-	// 1. 将下注金额返还给用户（相当于没玩）
-	// 2. 不记录游戏结果
-	QKLDoBetStop(context.Context, *QKLDoBetStopReq) (*QKLDoBetStopResp, error)
-	// *
-	// 一次性行下注
-	QKLDoBet(context.Context, *QKLDoBetReq) (*QKLDoBetResp, error)
-	// *
-	// 多人游戏下注 - 开发环境（包含 recordId）
-	QKLDoBetMultiplayerGame(context.Context, *QKLDoBetMultiplayerGameReq) (*QKLDoBetMultiplayerGameResp, error)
-	// *
-	// 多人游戏取消下注 - 开发环境
-	QKLCancelBetMultiplayerGame(context.Context, *QKLCancelBetMultiplayerGameReq) (*QKLCancelBetMultiplayerGameResp, error)
-	// *
-	// 百人游戏提现/赢钱 - 开发环境
-	//
-	// 流程：
-	// 1. 从 pool 扣除 win 金额
-	// 2. 返还 win 到用户余额
-	QKLDoMultiplayerCashout(context.Context, *QKLDoMultiplayerCashoutReq) (*QKLDoMultiplayerCashoutResp, error)
-	// *
-	// 保存多人游戏记录 - 开发环境（空实现）
-	QKLSaveMultiplayerRecords(context.Context, *QKLSaveMultiplayerRecordsReq) (*QKLSaveMultiplayerRecordsResp, error)
-	// *
-	// 百人游戏结算 - 开发环境
-	//
-	// 流程：
-	// 1. 遍历 dispatchRewardGold 为正的 GameRecord 数组
-	// 2. 累计 totalwin，从 pool 扣除
-	// 3. 根据 userId，设置用户的金币 win
-	// 4. 生成环境还需要记录结算结果到数据库，开发环境不处理
-	QKLSettleMultiplayer(context.Context, *QKLSettleMultiplayerReq) (*QKLSettleMultiplayerResp, error)
+	// 扣除玩家余额并登记本局下注；同一 roundId + betId 重试不会重复扣款。
+	Bet(context.Context, *BetRequest) (*BetResponse, error)
+	// 根据冻结后的下注摘要和候选结果，申请奖池赔付预留。
+	PrePay(context.Context, *PrePayRequest) (*PrePayResponse, error)
+	// 在预留到期前续租，防止长牌局的赔付额度被自动释放。
+	RenewPrePay(context.Context, *RenewPrePayRequest) (*PrePayResponse, error)
+	// 在结果公开前主动释放赔付预留，不退还玩家下注。
+	ReleasePrePay(context.Context, *ReleasePrePayRequest) (*PrePayResponse, error)
+	// 批量结算本局全部真人玩家，或按 VOID_REFUND 原路退回全部下注。
+	Settlement(context.Context, *SettlementRequest) (*SettlementResponse, error)
+	// 查询本局资金状态，用于 RPC 超时、重连和服务迁移后的恢复。
+	GetRoundFinanceState(context.Context, *GetRoundFinanceStateReq) (*GetRoundFinanceStateResp, error)
 	mustEmbedUnimplementedLotteryServiceServer()
 }
 
@@ -379,47 +139,23 @@ type LotteryServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedLotteryServiceServer struct{}
 
-func (UnimplementedLotteryServiceServer) PoolAmountResult(context.Context, *PoolAmountResultReq) (*PoolAmountResultResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method PoolAmountResult not implemented")
+func (UnimplementedLotteryServiceServer) Bet(context.Context, *BetRequest) (*BetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Bet not implemented")
 }
-func (UnimplementedLotteryServiceServer) SlotsLottery(context.Context, *SlotsLotteryReq) (*SlotsLotteryResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method SlotsLottery not implemented")
+func (UnimplementedLotteryServiceServer) PrePay(context.Context, *PrePayRequest) (*PrePayResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PrePay not implemented")
 }
-func (UnimplementedLotteryServiceServer) QKLDoBetInit(context.Context, *QKLDoBetInitReq) (*QKLDoBetInitResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBetInit not implemented")
+func (UnimplementedLotteryServiceServer) RenewPrePay(context.Context, *RenewPrePayRequest) (*PrePayResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenewPrePay not implemented")
 }
-func (UnimplementedLotteryServiceServer) QKLDoBetMore(context.Context, *QKLDoBetMoreReq) (*QKLDoBetMoreResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBetMore not implemented")
+func (UnimplementedLotteryServiceServer) ReleasePrePay(context.Context, *ReleasePrePayRequest) (*PrePayResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleasePrePay not implemented")
 }
-func (UnimplementedLotteryServiceServer) QKLDoBetContinue(context.Context, *QKLDoBetContinueReq) (*QKLDoBetContinueResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBetContinue not implemented")
+func (UnimplementedLotteryServiceServer) Settlement(context.Context, *SettlementRequest) (*SettlementResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Settlement not implemented")
 }
-func (UnimplementedLotteryServiceServer) QKLDoBetSettle(context.Context, *QKLDoBetSettleReq) (*QKLDoBetSettleResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBetSettle not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLDoBetSettleWithCheck(context.Context, *QKLDoBetSettleWithCheckReq) (*QKLDoBetSettleWithCheckResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBetSettleWithCheck not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLDoBetStop(context.Context, *QKLDoBetStopReq) (*QKLDoBetStopResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBetStop not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLDoBet(context.Context, *QKLDoBetReq) (*QKLDoBetResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBet not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLDoBetMultiplayerGame(context.Context, *QKLDoBetMultiplayerGameReq) (*QKLDoBetMultiplayerGameResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoBetMultiplayerGame not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLCancelBetMultiplayerGame(context.Context, *QKLCancelBetMultiplayerGameReq) (*QKLCancelBetMultiplayerGameResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLCancelBetMultiplayerGame not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLDoMultiplayerCashout(context.Context, *QKLDoMultiplayerCashoutReq) (*QKLDoMultiplayerCashoutResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLDoMultiplayerCashout not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLSaveMultiplayerRecords(context.Context, *QKLSaveMultiplayerRecordsReq) (*QKLSaveMultiplayerRecordsResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLSaveMultiplayerRecords not implemented")
-}
-func (UnimplementedLotteryServiceServer) QKLSettleMultiplayer(context.Context, *QKLSettleMultiplayerReq) (*QKLSettleMultiplayerResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method QKLSettleMultiplayer not implemented")
+func (UnimplementedLotteryServiceServer) GetRoundFinanceState(context.Context, *GetRoundFinanceStateReq) (*GetRoundFinanceStateResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRoundFinanceState not implemented")
 }
 func (UnimplementedLotteryServiceServer) mustEmbedUnimplementedLotteryServiceServer() {}
 func (UnimplementedLotteryServiceServer) testEmbeddedByValue()                        {}
@@ -442,254 +178,110 @@ func RegisterLotteryServiceServer(s grpc.ServiceRegistrar, srv LotteryServiceSer
 	s.RegisterService(&LotteryService_ServiceDesc, srv)
 }
 
-func _LotteryService_PoolAmountResult_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PoolAmountResultReq)
+func _LotteryService_Bet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LotteryServiceServer).PoolAmountResult(ctx, in)
+		return srv.(LotteryServiceServer).Bet(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LotteryService_PoolAmountResult_FullMethodName,
+		FullMethod: LotteryService_Bet_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).PoolAmountResult(ctx, req.(*PoolAmountResultReq))
+		return srv.(LotteryServiceServer).Bet(ctx, req.(*BetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LotteryService_SlotsLottery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SlotsLotteryReq)
+func _LotteryService_PrePay_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrePayRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LotteryServiceServer).SlotsLottery(ctx, in)
+		return srv.(LotteryServiceServer).PrePay(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LotteryService_SlotsLottery_FullMethodName,
+		FullMethod: LotteryService_PrePay_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).SlotsLottery(ctx, req.(*SlotsLotteryReq))
+		return srv.(LotteryServiceServer).PrePay(ctx, req.(*PrePayRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LotteryService_QKLDoBetInit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetInitReq)
+func _LotteryService_RenewPrePay_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenewPrePayRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBetInit(ctx, in)
+		return srv.(LotteryServiceServer).RenewPrePay(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LotteryService_QKLDoBetInit_FullMethodName,
+		FullMethod: LotteryService_RenewPrePay_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBetInit(ctx, req.(*QKLDoBetInitReq))
+		return srv.(LotteryServiceServer).RenewPrePay(ctx, req.(*RenewPrePayRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LotteryService_QKLDoBetMore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetMoreReq)
+func _LotteryService_ReleasePrePay_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleasePrePayRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBetMore(ctx, in)
+		return srv.(LotteryServiceServer).ReleasePrePay(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LotteryService_QKLDoBetMore_FullMethodName,
+		FullMethod: LotteryService_ReleasePrePay_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBetMore(ctx, req.(*QKLDoBetMoreReq))
+		return srv.(LotteryServiceServer).ReleasePrePay(ctx, req.(*ReleasePrePayRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LotteryService_QKLDoBetContinue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetContinueReq)
+func _LotteryService_Settlement_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SettlementRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBetContinue(ctx, in)
+		return srv.(LotteryServiceServer).Settlement(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LotteryService_QKLDoBetContinue_FullMethodName,
+		FullMethod: LotteryService_Settlement_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBetContinue(ctx, req.(*QKLDoBetContinueReq))
+		return srv.(LotteryServiceServer).Settlement(ctx, req.(*SettlementRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LotteryService_QKLDoBetSettle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetSettleReq)
+func _LotteryService_GetRoundFinanceState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRoundFinanceStateReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBetSettle(ctx, in)
+		return srv.(LotteryServiceServer).GetRoundFinanceState(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LotteryService_QKLDoBetSettle_FullMethodName,
+		FullMethod: LotteryService_GetRoundFinanceState_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBetSettle(ctx, req.(*QKLDoBetSettleReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLDoBetSettleWithCheck_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetSettleWithCheckReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBetSettleWithCheck(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLDoBetSettleWithCheck_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBetSettleWithCheck(ctx, req.(*QKLDoBetSettleWithCheckReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLDoBetStop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetStopReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBetStop(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLDoBetStop_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBetStop(ctx, req.(*QKLDoBetStopReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLDoBet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBet(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLDoBet_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBet(ctx, req.(*QKLDoBetReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLDoBetMultiplayerGame_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoBetMultiplayerGameReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoBetMultiplayerGame(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLDoBetMultiplayerGame_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoBetMultiplayerGame(ctx, req.(*QKLDoBetMultiplayerGameReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLCancelBetMultiplayerGame_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLCancelBetMultiplayerGameReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLCancelBetMultiplayerGame(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLCancelBetMultiplayerGame_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLCancelBetMultiplayerGame(ctx, req.(*QKLCancelBetMultiplayerGameReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLDoMultiplayerCashout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLDoMultiplayerCashoutReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLDoMultiplayerCashout(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLDoMultiplayerCashout_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLDoMultiplayerCashout(ctx, req.(*QKLDoMultiplayerCashoutReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLSaveMultiplayerRecords_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLSaveMultiplayerRecordsReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLSaveMultiplayerRecords(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLSaveMultiplayerRecords_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLSaveMultiplayerRecords(ctx, req.(*QKLSaveMultiplayerRecordsReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LotteryService_QKLSettleMultiplayer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QKLSettleMultiplayerReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LotteryServiceServer).QKLSettleMultiplayer(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LotteryService_QKLSettleMultiplayer_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LotteryServiceServer).QKLSettleMultiplayer(ctx, req.(*QKLSettleMultiplayerReq))
+		return srv.(LotteryServiceServer).GetRoundFinanceState(ctx, req.(*GetRoundFinanceStateReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -702,60 +294,28 @@ var LotteryService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*LotteryServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "PoolAmountResult",
-			Handler:    _LotteryService_PoolAmountResult_Handler,
+			MethodName: "Bet",
+			Handler:    _LotteryService_Bet_Handler,
 		},
 		{
-			MethodName: "SlotsLottery",
-			Handler:    _LotteryService_SlotsLottery_Handler,
+			MethodName: "PrePay",
+			Handler:    _LotteryService_PrePay_Handler,
 		},
 		{
-			MethodName: "QKLDoBetInit",
-			Handler:    _LotteryService_QKLDoBetInit_Handler,
+			MethodName: "RenewPrePay",
+			Handler:    _LotteryService_RenewPrePay_Handler,
 		},
 		{
-			MethodName: "QKLDoBetMore",
-			Handler:    _LotteryService_QKLDoBetMore_Handler,
+			MethodName: "ReleasePrePay",
+			Handler:    _LotteryService_ReleasePrePay_Handler,
 		},
 		{
-			MethodName: "QKLDoBetContinue",
-			Handler:    _LotteryService_QKLDoBetContinue_Handler,
+			MethodName: "Settlement",
+			Handler:    _LotteryService_Settlement_Handler,
 		},
 		{
-			MethodName: "QKLDoBetSettle",
-			Handler:    _LotteryService_QKLDoBetSettle_Handler,
-		},
-		{
-			MethodName: "QKLDoBetSettleWithCheck",
-			Handler:    _LotteryService_QKLDoBetSettleWithCheck_Handler,
-		},
-		{
-			MethodName: "QKLDoBetStop",
-			Handler:    _LotteryService_QKLDoBetStop_Handler,
-		},
-		{
-			MethodName: "QKLDoBet",
-			Handler:    _LotteryService_QKLDoBet_Handler,
-		},
-		{
-			MethodName: "QKLDoBetMultiplayerGame",
-			Handler:    _LotteryService_QKLDoBetMultiplayerGame_Handler,
-		},
-		{
-			MethodName: "QKLCancelBetMultiplayerGame",
-			Handler:    _LotteryService_QKLCancelBetMultiplayerGame_Handler,
-		},
-		{
-			MethodName: "QKLDoMultiplayerCashout",
-			Handler:    _LotteryService_QKLDoMultiplayerCashout_Handler,
-		},
-		{
-			MethodName: "QKLSaveMultiplayerRecords",
-			Handler:    _LotteryService_QKLSaveMultiplayerRecords_Handler,
-		},
-		{
-			MethodName: "QKLSettleMultiplayer",
-			Handler:    _LotteryService_QKLSettleMultiplayer_Handler,
+			MethodName: "GetRoundFinanceState",
+			Handler:    _LotteryService_GetRoundFinanceState_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

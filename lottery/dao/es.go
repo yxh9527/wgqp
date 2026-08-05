@@ -30,29 +30,6 @@ func NewESDao(client *elastic.Client) *ESDao {
 	return &ESDao{Client: client}
 }
 
-type PoolRecordLog struct {
-	AgentId    uint32  `json:"agentId"`
-	Symbol     string  `json:"symbol"`
-	AreaId     uint32  `json:"areaId"`
-	PoolValue  float64 `json:"poolValue"`
-	Normal     float64 `json:"normal"`
-	NormalRate float64 `json:"normalRate"`
-	Min        float64 `json:"min"`
-	MinRate    float64 `json:"minRate"`
-	Max        float64 `json:"max"`
-	MaxRate    float64 `json:"maxRate"`
-	Ctl        float64 `json:"ctl"`
-	Revenue    float64 `json:"revenue"`
-	CreateTime int64   `json:"createTime"`
-}
-
-func (e *ESDao) Add(log *PoolRecordLog) {
-	if _, err := e.Client.Index().Index("pp_pool_record_log").BodyJson(log).Do(context.Background()); err != nil {
-		zap.L().Error("数据入库失败", zap.Error(err))
-		return
-	}
-}
-
 func (esDao *ESDao) BulkRecordsSave(data []*entity.CacheRecordsReq) error {
 	bulkService := esDao.Client.Bulk()
 	records := make([]elastic.BulkableRequest, 0)
@@ -82,31 +59,3 @@ func (esDao *ESDao) BulkBillsSave(data []*entity.CacheBillsReq) error {
 	}
 	return nil
 }
-
-// func (esDao *ESDao) GetGameState(req *services.SlotsGetGameStateReq) *services.SlotsSaveGameStateReq {
-// 	querys := make([]elastic.Query, 0)
-// 	querys = append(querys, elastic.NewTermQuery("userId", req.UserId))
-// 	querys = append(querys, elastic.NewTermQuery("symbol", req.Symbol))
-// 	querys = append(querys, elastic.NewMatchPhraseQuery("currency", req.Currency))
-// 	// zap.L().Debug("获取游戏状态", zap.Any("req", req))
-// 	boolQuery := elastic.NewBoolQuery().Must(querys...)
-// 	resp, err := esDao.Client.Search().Index("pp_game_states").
-// 		Query(boolQuery).
-// 		Pretty(true).
-// 		Do(context.Background())
-// 	if err != nil {
-// 		zap.L().Error("获取游戏状态失败", zap.Any("err", err))
-// 		return nil
-// 	}
-// 	records := make([]*services.SlotsSaveGameStateReq, 0, 8)
-// 	for _, v := range resp.Hits.Hits {
-// 		b, _ := v.Source.MarshalJSON()
-// 		r := &services.SlotsSaveGameStateReq{}
-// 		json.Unmarshal(b, r)
-// 		records = append(records, r)
-// 	}
-// 	if len(records) > 0 {
-// 		return records[0]
-// 	}
-// 	return nil
-// }
