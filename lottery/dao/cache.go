@@ -108,7 +108,7 @@ func (gcm *GameCacheMgr) GetAgent(agentID int64) *AgentData {
 	return agent
 }
 
-// GetPool 返回扣除有效预留后的可用奖池：Pool = 有效下注 - 总赔付 - 税收 - 有效预留。
+// GetPool 返回扣除有效预留后的可用水池：Pool = 有效下注 - 总赔付 - 税收 - 有效预留。
 func (gcm *GameCacheMgr) GetPool(agentID int64, symbol string) decimal.Decimal {
 	agent := gcm.GetAgent(agentID)
 	agent.lock.Lock()
@@ -120,7 +120,7 @@ func (gcm *GameCacheMgr) GetPool(agentID int64, symbol string) decimal.Decimal {
 	return availablePoolValue(game, reserved)
 }
 
-// poolValue 计算尚未扣除有效预留的基础奖池：BasePool = 有效下注 - 总赔付 - 税收。
+// poolValue 计算尚未扣除有效预留的基础水池：有效下注 - 总赔付 - 税收。
 func poolValue(game *Game) decimal.Decimal {
 	return game.TotalEffectBet.Sub(game.TotalProfLoss).Sub(game.TotalRevenue)
 }
