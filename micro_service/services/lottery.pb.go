@@ -437,10 +437,11 @@ type PrePayRequest struct {
 	// 完整候选游戏结果的摘要。
 	OutcomeHash string `protobuf:"bytes,7,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
 	// 预留有效秒数；传 0 使用服务默认值 300 秒。
-	TimeoutSeconds uint32        `protobuf:"varint,8,opt,name=timeoutSeconds,proto3" json:"timeoutSeconds,omitempty"`
-	Items          []*PrePayItem `protobuf:"bytes,9,rep,name=items,proto3" json:"items,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	TimeoutSeconds  uint32        `protobuf:"varint,8,opt,name=timeoutSeconds,proto3" json:"timeoutSeconds,omitempty"`
+	Items           []*PrePayItem `protobuf:"bytes,9,rep,name=items,proto3" json:"items,omitempty"`
+	ReservationMode string        `protobuf:"bytes,10,opt,name=reservationMode,proto3" json:"reservationMode,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PrePayRequest) Reset() {
@@ -536,6 +537,13 @@ func (x *PrePayRequest) GetItems() []*PrePayItem {
 	return nil
 }
 
+func (x *PrePayRequest) GetReservationMode() string {
+	if x != nil {
+		return x.ReservationMode
+	}
+	return ""
+}
+
 // 赔付预留响应。
 type PrePayResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -551,11 +559,12 @@ type PrePayResponse struct {
 	// Unix 秒级过期时间。
 	ExpiresAt int64 `protobuf:"varint,7,opt,name=expiresAt,proto3" json:"expiresAt,omitempty"`
 	// INVALID_REQUEST、BET_MISMATCH、ROUND_CONFLICT 或 INSUFFICIENT_POOL。
-	Reason        string `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
-	BetDigest     string `protobuf:"bytes,9,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
-	OutcomeHash   string `protobuf:"bytes,10,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Reason          string `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
+	BetDigest       string `protobuf:"bytes,9,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	OutcomeHash     string `protobuf:"bytes,10,opt,name=outcomeHash,proto3" json:"outcomeHash,omitempty"`
+	ReservationMode string `protobuf:"bytes,11,opt,name=reservationMode,proto3" json:"reservationMode,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PrePayResponse) Reset() {
@@ -654,6 +663,13 @@ func (x *PrePayResponse) GetBetDigest() string {
 func (x *PrePayResponse) GetOutcomeHash() string {
 	if x != nil {
 		return x.OutcomeHash
+	}
+	return ""
+}
+
+func (x *PrePayResponse) GetReservationMode() string {
+	if x != nil {
+		return x.ReservationMode
 	}
 	return ""
 }
@@ -1081,7 +1097,9 @@ type GetRoundFinanceStateResp struct {
 	// 本局全部已接受下注换算后的 CNY 总额。
 	TotalBetCny string `protobuf:"bytes,9,opt,name=totalBetCny,proto3" json:"totalBetCny,omitempty"`
 	// 当前预留记录的 CNY 金额。
-	TotalReservedCny string `protobuf:"bytes,10,opt,name=totalReservedCny,proto3" json:"totalReservedCny,omitempty"`
+	TotalReservedCny string        `protobuf:"bytes,10,opt,name=totalReservedCny,proto3" json:"totalReservedCny,omitempty"`
+	ReservationMode  string        `protobuf:"bytes,11,opt,name=reservationMode,proto3" json:"reservationMode,omitempty"`
+	ReservedItems    []*PrePayItem `protobuf:"bytes,12,rep,name=reservedItems,proto3" json:"reservedItems,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1186,6 +1204,20 @@ func (x *GetRoundFinanceStateResp) GetTotalReservedCny() string {
 	return ""
 }
 
+func (x *GetRoundFinanceStateResp) GetReservationMode() string {
+	if x != nil {
+		return x.ReservationMode
+	}
+	return ""
+}
+
+func (x *GetRoundFinanceStateResp) GetReservedItems() []*PrePayItem {
+	if x != nil {
+		return x.ReservedItems
+	}
+	return nil
+}
+
 var File_lottery_proto protoreflect.FileDescriptor
 
 const file_lottery_proto_rawDesc = "" +
@@ -1223,7 +1255,7 @@ const file_lottery_proto_rawDesc = "" +
 	"PrePayItem\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\"\n" +
 	"\fcurrencyType\x18\x02 \x01(\tR\fcurrencyType\x12\x16\n" +
-	"\x06payout\x18\x03 \x01(\tR\x06payout\"\x9e\x02\n" +
+	"\x06payout\x18\x03 \x01(\tR\x06payout\"\xc8\x02\n" +
 	"\rPrePayRequest\x12\x1c\n" +
 	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
 	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x16\n" +
@@ -1233,7 +1265,9 @@ const file_lottery_proto_rawDesc = "" +
 	"\tbetDigest\x18\x06 \x01(\tR\tbetDigest\x12 \n" +
 	"\voutcomeHash\x18\a \x01(\tR\voutcomeHash\x12&\n" +
 	"\x0etimeoutSeconds\x18\b \x01(\rR\x0etimeoutSeconds\x12)\n" +
-	"\x05items\x18\t \x03(\v2\x13.lottery.PrePayItemR\x05items\"\xc4\x02\n" +
+	"\x05items\x18\t \x03(\v2\x13.lottery.PrePayItemR\x05items\x12(\n" +
+	"\x0freservationMode\x18\n" +
+	" \x01(\tR\x0freservationMode\"\xee\x02\n" +
 	"\x0ePrePayResponse\x12$\n" +
 	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
@@ -1245,7 +1279,8 @@ const file_lottery_proto_rawDesc = "" +
 	"\x06reason\x18\b \x01(\tR\x06reason\x12\x1c\n" +
 	"\tbetDigest\x18\t \x01(\tR\tbetDigest\x12 \n" +
 	"\voutcomeHash\x18\n" +
-	" \x01(\tR\voutcomeHash\"\xc6\x01\n" +
+	" \x01(\tR\voutcomeHash\x12(\n" +
+	"\x0freservationMode\x18\v \x01(\tR\x0freservationMode\"\xc6\x01\n" +
 	"\x0eSettlementItem\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\rR\x06userId\x12\"\n" +
 	"\fcurrencyType\x18\x02 \x01(\tR\fcurrencyType\x12\x1c\n" +
@@ -1278,7 +1313,7 @@ const file_lottery_proto_rawDesc = "" +
 	"\fsettlementId\x18\x04 \x01(\tR\fsettlementId\x123\n" +
 	"\x05items\x18\x05 \x03(\v2\x1d.lottery.SettlementItemResultR\x05items\"3\n" +
 	"\x17GetRoundFinanceStateReq\x12\x18\n" +
-	"\aroundId\x18\x01 \x01(\tR\aroundId\"\xe6\x02\n" +
+	"\aroundId\x18\x01 \x01(\tR\aroundId\"\xcb\x03\n" +
 	"\x18GetRoundFinanceStateResp\x12$\n" +
 	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
 	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x14\n" +
@@ -1290,7 +1325,9 @@ const file_lottery_proto_rawDesc = "" +
 	"\fsettlementId\x18\b \x01(\tR\fsettlementId\x12 \n" +
 	"\vtotalBetCny\x18\t \x01(\tR\vtotalBetCny\x12*\n" +
 	"\x10totalReservedCny\x18\n" +
-	" \x01(\tR\x10totalReservedCny2\xa1\x02\n" +
+	" \x01(\tR\x10totalReservedCny\x12(\n" +
+	"\x0freservationMode\x18\v \x01(\tR\x0freservationMode\x129\n" +
+	"\rreservedItems\x18\f \x03(\v2\x13.lottery.PrePayItemR\rreservedItems2\xa1\x02\n" +
 	"\x0eLotteryService\x120\n" +
 	"\x03Bet\x12\x13.lottery.BetRequest\x1a\x14.lottery.BetResponse\x129\n" +
 	"\x06PrePay\x12\x16.lottery.PrePayRequest\x1a\x17.lottery.PrePayResponse\x12E\n" +
@@ -1339,19 +1376,20 @@ var file_lottery_proto_depIdxs = []int32{
 	13, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
 	9,  // 9: lottery.SettlementResponse.items:type_name -> lottery.SettlementItemResult
 	13, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
-	1,  // 11: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
-	5,  // 12: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
-	8,  // 13: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
-	11, // 14: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
-	3,  // 15: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
-	6,  // 16: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
-	10, // 17: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
-	12, // 18: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
-	15, // [15:19] is the sub-list for method output_type
-	11, // [11:15] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	4,  // 11: lottery.GetRoundFinanceStateResp.reservedItems:type_name -> lottery.PrePayItem
+	1,  // 12: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
+	5,  // 13: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
+	8,  // 14: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
+	11, // 15: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
+	3,  // 16: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
+	6,  // 17: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
+	10, // 18: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
+	12, // 19: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
+	16, // [16:20] is the sub-list for method output_type
+	12, // [12:16] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_lottery_proto_init() }

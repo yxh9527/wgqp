@@ -34,6 +34,9 @@ const (
 	defaultReservationTimeoutSeconds = 300
 	financeModeNormal                = "NORMAL"
 	financeModeVoidRefund            = "VOID_REFUND"
+	// reservationModeLiabilityCap 为单人房发牌前责任上限预留：
+	// 可在预留下继续接受下注，结算时实际赔付不得超过该上限。
+	reservationModeLiabilityCap = "LIABILITY_CAP"
 )
 
 type financeState string
@@ -69,6 +72,8 @@ type financeReservation struct {
 	TotalPayoutCNY string `json:"totalPayoutCny"`
 	ExpiresAt      int64  `json:"expiresAt"`
 	Status         string `json:"status"`
+	// Mode 为空表示精确结果预留；LIABILITY_CAP 表示责任上限预留。
+	Mode string `json:"mode,omitempty"`
 }
 
 type financeSettlementResult struct {
@@ -899,7 +904,7 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 			Accepted:     false,
 			Code:         int32(services.ErrorCode_PARAMS_INVALID),
 		}
-		if round.State != string(financeStateBetting) {
+		if !d.roundAcceptsBets(round) {
 			snapshot.Message = "round is not accepting bets"
 			resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
 			continue
@@ -947,6 +952,11 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 		d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
 
 		resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
+	}
+
+	// 责任上限预留下允许继续下注：同步刷新预留绑定的 betDigest，便于后续结算校验。
+	if shouldSave && d.isActiveLiabilityCap(round) {
+		round.Reservation.BetDigest = d.roundBetDigest(round)
 	}
 
 	resp.State = d.roundStateCode(round)
@@ -1020,19 +1030,25 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 		resp.Reason = "ROUND_CONFLICT"
 		return resp, nil
 	}
+	reservationMode := strings.TrimSpace(req.ReservationMode)
 	if round.Reservation != nil && round.Reservation.Status == string(financeStateReserved) {
+		// 精确预留：betDigest + outcomeHash 一致时幂等返回。
 		if round.Reservation.OutcomeHash == req.OutcomeHash && round.Reservation.BetDigest == digest {
 			resp.Success = true
 			resp.State = round.State
 			resp.ReservationId = round.Reservation.ReservationID
 			resp.TotalPayoutCny = round.Reservation.TotalPayoutCNY
 			resp.ExpiresAt = round.Reservation.ExpiresAt
+			resp.ReservationMode = round.Reservation.Mode
 			resp.Reason = ""
 			return resp, nil
 		}
-		resp.Code = services.ErrorCode_PARAMS_INVALID
-		resp.Reason = "ROUND_CONFLICT"
-		return resp, nil
+		// 责任上限预留：允许换牌后用新 outcomeHash / 新上限重试，或在上限内建立精确预留。
+		if round.Reservation.Mode != reservationModeLiabilityCap {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			resp.Reason = "ROUND_CONFLICT"
+			return resp, nil
+		}
 	}
 	if req.OutcomeHash == "" {
 		resp.Code = services.ErrorCode_PARAMS_INVALID
@@ -1091,6 +1107,63 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 	}
 	resp.TotalPayoutCny = decimalString(totalPayoutCNY)
 
+	// 已有责任上限预留时，按差额调整奖池占用，而不是直接冲突拒绝。
+	if round.Reservation != nil &&
+		round.Reservation.Status == string(financeStateReserved) &&
+		round.Reservation.Mode == reservationModeLiabilityCap {
+		oldAmount, parseErr := decimal.NewFromString(round.Reservation.TotalPayoutCNY)
+		if parseErr != nil {
+			resp.Code = services.ErrorCode_SYSTEM_ERROR
+			resp.Reason = "RESERVATION_PERSIST_FAILED"
+			return resp, nil
+		}
+		delta := totalPayoutCNY.Sub(oldAmount)
+		if delta.IsPositive() {
+			reserved, reserveErr := dao.CacheIns().TryReservePool(int64(req.Agent), runtime.PoolSymbol, delta)
+			if reserveErr != nil {
+				resp.Code = services.ErrorCode_SYSTEM_ERROR
+				resp.Reason = "RESERVATION_PERSIST_FAILED"
+				return resp, nil
+			}
+			if !reserved {
+				resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
+				resp.Reason = "INSUFFICIENT_POOL"
+				return resp, nil
+			}
+		} else if delta.IsNegative() {
+			if !dao.CacheIns().ReleasePoolReservation(int64(req.Agent), runtime.PoolSymbol, delta.Abs()) {
+				resp.Code = services.ErrorCode_SYSTEM_ERROR
+				resp.Reason = "RESERVATION_PERSIST_FAILED"
+				return resp, nil
+			}
+		}
+		timeoutSeconds := req.TimeoutSeconds
+		if timeoutSeconds == 0 {
+			timeoutSeconds = defaultReservationTimeoutSeconds
+		}
+		round.Reservation.RequestID = req.RequestId
+		round.Reservation.BetDigest = digest
+		round.Reservation.OutcomeHash = req.OutcomeHash
+		round.Reservation.TotalPayoutCNY = decimalString(totalPayoutCNY)
+		round.Reservation.ExpiresAt = time.Now().Add(time.Duration(timeoutSeconds) * time.Second).Unix()
+		// 精确预留会锁住后续下注；责任上限预留保持可继续下注。
+		if reservationMode == reservationModeLiabilityCap {
+			round.Reservation.Mode = reservationModeLiabilityCap
+			round.State = string(financeStateReserved)
+		} else {
+			round.Reservation.Mode = ""
+			round.State = string(financeStateReserved)
+		}
+		d.saveRoundLocked(round)
+
+		resp.Success = true
+		resp.State = round.State
+		resp.ReservationId = round.Reservation.ReservationID
+		resp.ExpiresAt = round.Reservation.ExpiresAt
+		resp.ReservationMode = round.Reservation.Mode
+		return resp, nil
+	}
+
 	// Redis Lua 在一次操作中检查基础奖池、扣除已有预留并建立本次预留。
 	reserved, reserveErr := dao.CacheIns().TryReservePool(int64(req.Agent), runtime.PoolSymbol, totalPayoutCNY)
 	if reserveErr != nil {
@@ -1116,6 +1189,7 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 		TotalPayoutCNY: decimalString(totalPayoutCNY),
 		ExpiresAt:      time.Now().Add(time.Duration(timeoutSeconds) * time.Second).Unix(),
 		Status:         string(financeStateReserved),
+		Mode:           reservationMode,
 	}
 	round.State = string(financeStateReserved)
 	d.saveRoundLocked(round)
@@ -1124,6 +1198,7 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 	resp.State = round.State
 	resp.ReservationId = round.Reservation.ReservationID
 	resp.ExpiresAt = round.Reservation.ExpiresAt
+	resp.ReservationMode = round.Reservation.Mode
 	return resp, nil
 }
 
@@ -1207,12 +1282,24 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
-		if req.ReservationId == "" || req.ReservationId != round.Reservation.ReservationID || req.OutcomeHash == "" || req.OutcomeHash != round.Reservation.OutcomeHash {
+		if req.ReservationId == "" || req.ReservationId != round.Reservation.ReservationID || req.OutcomeHash == "" {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			return resp, nil
+		}
+		// 责任上限预留允许最终结算 outcomeHash 与发牌前预留不同，
+		// 实际赔付不超过预留上限即可；精确预留仍要求 outcomeHash 完全一致。
+		if round.Reservation.Mode == reservationModeLiabilityCap {
+			// 校验放到汇总 payout 之后。
+		} else if req.OutcomeHash != round.Reservation.OutcomeHash {
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
 	} else if round.Reservation != nil && round.Reservation.Status == string(financeStateReserved) {
-		if req.ReservationId != round.Reservation.ReservationID || req.OutcomeHash != round.Reservation.OutcomeHash {
+		if req.ReservationId != round.Reservation.ReservationID {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			return resp, nil
+		}
+		if round.Reservation.Mode != reservationModeLiabilityCap && req.OutcomeHash != round.Reservation.OutcomeHash {
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
@@ -1461,6 +1548,7 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 		resp.ReservationId = round.Reservation.ReservationID
 		resp.OutcomeHash = round.Reservation.OutcomeHash
 		resp.ExpiresAt = round.Reservation.ExpiresAt
+		resp.ReservationMode = round.Reservation.Mode
 		if round.Reservation.Status == string(financeStateReserved) {
 			resp.TotalReservedCny = round.Reservation.TotalPayoutCNY
 		} else {
@@ -1471,4 +1559,22 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 		resp.SettlementId = round.Settlement.SettlementID
 	}
 	return resp, nil
+}
+
+func (d *LotteryService) isActiveLiabilityCap(round *financeRound) bool {
+	return round != nil &&
+		round.Reservation != nil &&
+		round.Reservation.Status == string(financeStateReserved) &&
+		round.Reservation.Mode == reservationModeLiabilityCap
+}
+
+// roundAcceptsBets：BETTING 可下注；责任上限预留下的 RESERVED 也允许继续加注。
+func (d *LotteryService) roundAcceptsBets(round *financeRound) bool {
+	if round == nil {
+		return false
+	}
+	if round.State == string(financeStateBetting) {
+		return true
+	}
+	return round.State == string(financeStateReserved) && d.isActiveLiabilityCap(round)
 }

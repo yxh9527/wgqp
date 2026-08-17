@@ -96,6 +96,7 @@ message PrePayRequest {
     // 预留有效秒数；传 0 使用服务默认值 300 秒。
     uint32 timeoutSeconds = 8;
     repeated PrePayItem items = 9;
+    string reservationMode = 10;
 }
 
 // 赔付预留响应。
@@ -115,6 +116,7 @@ message PrePayResponse {
     string reason = 8;
     string betDigest = 9;
     string outcomeHash = 10;
+    string reservationMode = 11;
 }
 
 // 单个真人玩家的结算数据。
@@ -186,4 +188,6 @@ message GetRoundFinanceStateResp {
     string totalBetCny = 9;
     // 当前预留记录的 CNY 金额。
     string totalReservedCny = 10;
+    string reservationMode = 11;
+    repeated PrePayItem reservedItems = 12;
 }
