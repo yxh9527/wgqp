@@ -23,6 +23,7 @@ const (
 	LotteryService_PrePay_FullMethodName               = "/lottery.LotteryService/PrePay"
 	LotteryService_Settlement_FullMethodName           = "/lottery.LotteryService/Settlement"
 	LotteryService_GetRoundFinanceState_FullMethodName = "/lottery.LotteryService/GetRoundFinanceState"
+	LotteryService_CancelBet_FullMethodName            = "/lottery.LotteryService/CancelBet"
 )
 
 // LotteryServiceClient is the client API for LotteryService service.
@@ -37,6 +38,9 @@ type LotteryServiceClient interface {
 	Settlement(ctx context.Context, in *SettlementRequest, opts ...grpc.CallOption) (*SettlementResponse, error)
 	// 查询本局资金状态，用于 RPC 超时确认和人工审核。
 	GetRoundFinanceState(ctx context.Context, in *GetRoundFinanceStateReq, opts ...grpc.CallOption) (*GetRoundFinanceStateResp, error)
+	// 百人玩家主动取消本局 ACTIVE 投注；退款金额由资金侧按 ACTIVE 投注计算，不由游戏服传入。
+	// 禁止用 PrePay/Settlement/VOID_REFUND 代替本接口。成功后牌局仍保持 BETTING。
+	CancelBet(ctx context.Context, in *CancelBetRequest, opts ...grpc.CallOption) (*CancelBetResponse, error)
 }
 
 type lotteryServiceClient struct {
@@ -87,6 +91,16 @@ func (c *lotteryServiceClient) GetRoundFinanceState(ctx context.Context, in *Get
 	return out, nil
 }
 
+func (c *lotteryServiceClient) CancelBet(ctx context.Context, in *CancelBetRequest, opts ...grpc.CallOption) (*CancelBetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelBetResponse)
+	err := c.cc.Invoke(ctx, LotteryService_CancelBet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LotteryServiceServer is the server API for LotteryService service.
 // All implementations must embed UnimplementedLotteryServiceServer
 // for forward compatibility.
@@ -99,6 +113,9 @@ type LotteryServiceServer interface {
 	Settlement(context.Context, *SettlementRequest) (*SettlementResponse, error)
 	// 查询本局资金状态，用于 RPC 超时确认和人工审核。
 	GetRoundFinanceState(context.Context, *GetRoundFinanceStateReq) (*GetRoundFinanceStateResp, error)
+	// 百人玩家主动取消本局 ACTIVE 投注；退款金额由资金侧按 ACTIVE 投注计算，不由游戏服传入。
+	// 禁止用 PrePay/Settlement/VOID_REFUND 代替本接口。成功后牌局仍保持 BETTING。
+	CancelBet(context.Context, *CancelBetRequest) (*CancelBetResponse, error)
 	mustEmbedUnimplementedLotteryServiceServer()
 }
 
@@ -120,6 +137,9 @@ func (UnimplementedLotteryServiceServer) Settlement(context.Context, *Settlement
 }
 func (UnimplementedLotteryServiceServer) GetRoundFinanceState(context.Context, *GetRoundFinanceStateReq) (*GetRoundFinanceStateResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRoundFinanceState not implemented")
+}
+func (UnimplementedLotteryServiceServer) CancelBet(context.Context, *CancelBetRequest) (*CancelBetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelBet not implemented")
 }
 func (UnimplementedLotteryServiceServer) mustEmbedUnimplementedLotteryServiceServer() {}
 func (UnimplementedLotteryServiceServer) testEmbeddedByValue()                        {}
@@ -214,6 +234,24 @@ func _LotteryService_GetRoundFinanceState_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LotteryService_CancelBet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelBetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LotteryServiceServer).CancelBet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LotteryService_CancelBet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LotteryServiceServer).CancelBet(ctx, req.(*CancelBetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LotteryService_ServiceDesc is the grpc.ServiceDesc for LotteryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -236,6 +274,10 @@ var LotteryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRoundFinanceState",
 			Handler:    _LotteryService_GetRoundFinanceState_Handler,
+		},
+		{
+			MethodName: "CancelBet",
+			Handler:    _LotteryService_CancelBet_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

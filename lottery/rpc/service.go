@@ -37,6 +37,10 @@ const (
 	// reservationModeLiabilityCap 为单人房发牌前责任上限预留：
 	// 可在预留下继续接受下注，结算时实际赔付不得超过该上限。
 	reservationModeLiabilityCap = "LIABILITY_CAP"
+
+	financeBetStatusActive   = "ACTIVE"
+	financeBetStatusCanceled = "CANCELED"
+	financeBetStatusSettled  = "SETTLED"
 )
 
 type financeState string
@@ -56,11 +60,54 @@ type financeBetSnapshot struct {
 	CurrencyType string `json:"currencyType"`
 	Amount       string `json:"amount"`
 	AmountCNY    string `json:"amountCny"`
-	AreaID       string `json:"areaId,omitempty"`
-	Accepted     bool   `json:"accepted"`
-	Code         int32  `json:"code"`
-	Currency     string `json:"currency,omitempty"`
-	Message      string `json:"message,omitempty"`
+	// AgentEffectAmountCNY 下注时写入 agent_effect_data 的 CNY 增量，取消时按该值冲销。
+	AgentEffectAmountCNY string `json:"agentEffectAmountCny,omitempty"`
+	// AgentRevenueAmountCNY 下注时计提的税收 CNY；取消时必须按原值冲销，禁止按当前配置重算。
+	AgentRevenueAmountCNY string `json:"agentRevenueAmountCny,omitempty"`
+	AreaID                string `json:"areaId,omitempty"`
+	Accepted              bool   `json:"accepted"`
+	// Status: ACTIVE / CANCELED / SETTLED；旧数据缺省时 Accepted=true 视为 ACTIVE。
+	Status   string `json:"status,omitempty"`
+	Code     int32  `json:"code"`
+	Currency string `json:"currency,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
+// financeEffectCancel 记录单笔取消对 agent_effect 的冲销流水（审计；唯一键 cancel:{roundId}:{betId}）。
+type financeEffectCancel struct {
+	BetID            string `json:"betId"`
+	RecordKey        string `json:"recordKey"`
+	UserID           uint32 `json:"userId"`
+	CurrencyType     string `json:"currencyType"`
+	EffectAmountCNY  string `json:"effectAmountCny"`
+	RevenueAmountCNY string `json:"revenueAmountCny"`
+	CreatedAt        int64  `json:"createdAt"`
+}
+
+const (
+	financeCancelStatusClaimed    = "CLAIMED"
+	financeCancelStatusCompleted  = "COMPLETED"
+	cancelWalletMarkerKeyPrefix   = "lottery:cancel_wallet:"
+	cancelWalletMarkerTTLSeconds  = 7 * 24 * 3600
+)
+
+// financeCancelRequest 固化 CancelBet 的 requestId 幂等结果。
+// 流程：先 CLAIMED 持久化（注单已 CANCELED）→ 钱包退款 → COMPLETED 持久化。
+// 禁止先退款再写 round：否则 Redis 写失败或进程崩溃会导致重试重复退款。
+type financeCancelRequest struct {
+	RequestID      string   `json:"requestId"`
+	UserID         uint32   `json:"userId"`
+	CurrencyType   string   `json:"currencyType"`
+	Status         string   `json:"status"`
+	Success        bool     `json:"success"`
+	WalletRefunded bool     `json:"walletRefunded"`
+	RefundAmount   string   `json:"refundAmount"`
+	Currency       string   `json:"currency"`
+	BetDigest      string   `json:"betDigest"`
+	BetRevision    int64    `json:"betRevision"`
+	CanceledBetIDs []string `json:"canceledBetIds"`
+	Reason         string   `json:"reason,omitempty"`
+	CompletedAt    int64    `json:"completedAt"`
 }
 
 // financeReservation 保存一次候选结果对应的奖池预留凭证。
@@ -96,17 +143,23 @@ type financeSettlement struct {
 
 // financeRound 是一个 roundId 的完整资金状态机快照。
 type financeRound struct {
-	RoundID     string                         `json:"roundId"`
-	GameID      uint32                         `json:"gameId"`
-	Agent       uint32                         `json:"agent"`
-	Level       uint32                         `json:"level"`
-	Symbol      string                         `json:"symbol"`
-	PoolSymbol  string                         `json:"poolSymbol"`
-	State       string                         `json:"state"`
+	RoundID    string                         `json:"roundId"`
+	GameID     uint32                         `json:"gameId"`
+	Agent      uint32                         `json:"agent"`
+	Level      uint32                         `json:"level"`
+	Symbol     string                         `json:"symbol"`
+	PoolSymbol string                         `json:"poolSymbol"`
+	State      string                         `json:"state"`
+	// BetRevision 本局下注修订号；CancelBet 成功后递增，新 betId 必须包含新 revision。
+	BetRevision int64 `json:"betRevision"`
 	Bets        map[string]*financeBetSnapshot `json:"bets"`
-	Reservation *financeReservation            `json:"reservation,omitempty"`
-	Settlement  *financeSettlement             `json:"settlement,omitempty"`
-	UpdatedAt   int64                          `json:"updatedAt"`
+	// CancelRequests requestId -> 首次 CancelBet 结果（强幂等）。
+	CancelRequests map[string]*financeCancelRequest `json:"cancelRequests,omitempty"`
+	// EffectCancels betId -> 冲销流水（同一 betId 不可重复冲销）。
+	EffectCancels map[string]*financeEffectCancel `json:"effectCancels,omitempty"`
+	Reservation   *financeReservation             `json:"reservation,omitempty"`
+	Settlement    *financeSettlement              `json:"settlement,omitempty"`
+	UpdatedAt     int64                           `json:"updatedAt"`
 }
 
 type RecordItem struct {
@@ -135,6 +188,11 @@ type LotteryService struct {
 
 	roundLock *sync.RWMutex
 	rounds    map[string]*financeRound
+
+	// testCurrencyHook 仅测试使用：拦截余额变更，避免依赖真实 Redis。
+	testCurrencyHook func(id uint32, delta int64) (int64, services.ErrorCode)
+	// testSkipPoolSideEffects 仅测试使用：跳过奖池/账单副作用。
+	testSkipPoolSideEffects bool
 }
 
 type PoolChangeRecord struct {
@@ -360,6 +418,9 @@ func (d *LotteryService) getPlayerCurrency(id uint32) (int64, services.ErrorCode
 }
 
 func (d *LotteryService) updatePlayerCurrency(id uint32, delta int64) (int64, services.ErrorCode) {
+	if d.testCurrencyHook != nil {
+		return d.testCurrencyHook(id, delta)
+	}
 	newCurrency, err := d.rds.UpdatePlayerCurrency(id, delta, 0, 0, 0)
 	if err != nil {
 		if errors.Is(err, dao.ErrInsufficientFunds) {
@@ -386,6 +447,9 @@ func (d *LotteryService) updatePlayerCurrency(id uint32, delta int64) (int64, se
 }
 
 func (d *LotteryService) SaveBill(agentId, playerId uint32, delta decimal.Decimal, currencyScore float64, symbol, desc, currencyType, roundID string) {
+	if d.testSkipPoolSideEffects {
+		return
+	}
 	now := time.Now()
 	billNo := fmt.Sprintf("L%04d%02d%02d%02d%02d%02d%07d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), now.Nanosecond()%10000000)
 	eGame := dao.GamesManagerIns().Get(symbol)
@@ -403,6 +467,45 @@ func (d *LotteryService) SaveBill(agentId, playerId uint32, delta decimal.Decima
 		Desc:           desc,
 	}
 	d.BillChan <- bill
+}
+
+func isActiveFinanceBet(item *financeBetSnapshot) bool {
+	if item == nil || !item.Accepted {
+		return false
+	}
+	switch item.Status {
+	case "", financeBetStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
+func cancelEffectRecordKey(roundID, betID string) string {
+	return fmt.Sprintf("cancel:%s:%s", roundID, betID)
+}
+
+func cancelWalletMarkerKey(requestID string) string {
+	return cancelWalletMarkerKeyPrefix + requestID
+}
+
+// parseBetIDRevision 从 betId 解析 `:rev:{n}:`；缺少或非法则 ok=false。
+func parseBetIDRevision(betID string) (rev int64, ok bool) {
+	const marker = ":rev:"
+	idx := strings.Index(betID, marker)
+	if idx < 0 {
+		return 0, false
+	}
+	rest := betID[idx+len(marker):]
+	end := strings.IndexByte(rest, ':')
+	if end <= 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(rest[:end], 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 func (d *LotteryService) SaveRecord(record *entity.CacheRecordsReq) *entity.CacheRecordsReq {
@@ -680,25 +783,43 @@ func (d *LotteryService) loadRoundLocked(roundID string) (*financeRound, bool) {
 	if round.Bets == nil {
 		round.Bets = make(map[string]*financeBetSnapshot)
 	}
+	if round.CancelRequests == nil {
+		round.CancelRequests = make(map[string]*financeCancelRequest)
+	}
+	if round.EffectCancels == nil {
+		round.EffectCancels = make(map[string]*financeEffectCancel)
+	}
 	d.rounds[round.RoundID] = round
 	return round, true
 }
 
 // saveRoundLocked 同步更新内存和 Redis 中的牌局资金快照。调用方必须持有 roundLock。
-func (d *LotteryService) saveRoundLocked(round *financeRound) {
+// 返回 error 时调用方必须视持久化为失败（CancelBet 不得在失败后仍返回成功）。
+func (d *LotteryService) saveRoundLocked(round *financeRound) error {
 	if round.Bets == nil {
 		round.Bets = make(map[string]*financeBetSnapshot)
+	}
+	if round.CancelRequests == nil {
+		round.CancelRequests = make(map[string]*financeCancelRequest)
+	}
+	if round.EffectCancels == nil {
+		round.EffectCancels = make(map[string]*financeEffectCancel)
 	}
 	round.UpdatedAt = time.Now().Unix()
 	d.rounds[round.RoundID] = round
 	raw, err := jsoniter.MarshalToString(round)
 	if err != nil {
 		zap.L().Error("encode finance round failed", zap.String("roundId", round.RoundID), zap.Error(err))
-		return
+		return err
+	}
+	if d.rds == nil {
+		return nil
 	}
 	if err := d.rds.HSet(financeRoundHash, raw, round.RoundID); err != nil {
 		zap.L().Error("persist finance round failed", zap.String("roundId", round.RoundID), zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 // expireRoundIfNeededLocked 释放已到期预留，使其不再占用可用奖池。
@@ -726,14 +847,14 @@ func (d *LotteryService) expireRoundIfNeededLocked(round *financeRound) bool {
 	return true
 }
 
-// roundBetDigest 对排序后的全部已接受下注计算 SHA-256，锁定结算使用的订单集合。
+// roundBetDigest 对排序后的全部 ACTIVE 下注计算 SHA-256，锁定结算使用的订单集合。
 func (d *LotteryService) roundBetDigest(round *financeRound) string {
 	if round == nil || len(round.Bets) == 0 {
 		return ""
 	}
 	keys := make([]string, 0, len(round.Bets))
 	for betID, item := range round.Bets {
-		if item != nil && item.Accepted {
+		if isActiveFinanceBet(item) {
 			keys = append(keys, betID)
 		}
 	}
@@ -753,14 +874,14 @@ func (d *LotteryService) roundBetDigest(round *financeRound) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// totalBetCNY 汇总本局已接受下注换算后的 CNY 金额。
+// totalBetCNY 汇总本局 ACTIVE 下注换算后的 CNY 金额。
 func (d *LotteryService) totalBetCNY(round *financeRound) decimal.Decimal {
 	total := decimal.Zero
 	if round == nil {
 		return total
 	}
 	for _, item := range round.Bets {
-		if item == nil || !item.Accepted {
+		if !isActiveFinanceBet(item) {
 			continue
 		}
 		amount, err := decimal.NewFromString(item.AmountCNY)
@@ -873,6 +994,24 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 			return resp, nil
 		}
 		d.expireRoundIfNeededLocked(round)
+		if ok, reason := d.ensureNoPendingCancelClaimsLocked(round, runtime); !ok {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			for _, item := range req.Items {
+				if item == nil {
+					continue
+				}
+				resp.Items = append(resp.Items, &services.BetItemResult{
+					BetId:    item.BetId,
+					UserId:   item.UserId,
+					Code:     services.ErrorCode_PARAMS_INVALID,
+					Accepted: false,
+					Message:  reason,
+				})
+			}
+			resp.State = d.roundStateCode(round)
+			resp.BetDigest = d.roundBetDigest(round)
+			return resp, nil
+		}
 	} else {
 		round = &financeRound{
 			RoundID:    req.RoundId,
@@ -914,6 +1053,22 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 			resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
 			continue
 		}
+		// betId 必须包含与当前 round.BetRevision 一致的 `:rev:{n}:`，防止取消后用旧 revision 重放下注。
+		betRev, revOK := parseBetIDRevision(item.BetId)
+		if !revOK {
+			snapshot.Message = "betId must contain :rev:{n}:"
+			resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
+			continue
+		}
+		if betRev != round.BetRevision {
+			snapshot.Message = fmt.Sprintf(
+				"betId revision mismatch: got=%d current=%d",
+				betRev,
+				round.BetRevision,
+			)
+			resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
+			continue
+		}
 		amount, parseErr := parseMoney(item.Amount)
 		if parseErr != nil || !amount.GreaterThan(decimal.Zero) {
 			snapshot.Message = "amount is invalid"
@@ -938,18 +1093,23 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 		}
 
 		amountCNY := amount.Mul(exchange).Truncate(4)
+		revenueCNY := amountCNY.Mul(runtime.Revenue).Truncate(4)
 		snapshot.Amount = decimalString(amount)
 		snapshot.AmountCNY = decimalString(amountCNY)
+		snapshot.AgentEffectAmountCNY = decimalString(amountCNY)
+		snapshot.AgentRevenueAmountCNY = decimalString(revenueCNY)
 		snapshot.Accepted = true
+		snapshot.Status = financeBetStatusActive
 		snapshot.Code = int32(services.ErrorCode_OK)
 		snapshot.Currency = decimalFromCent(newCurrency).Truncate(2).String()
 		round.Bets[item.BetId] = snapshot
 		shouldSave = true
 
-		revenueCNY := amountCNY.Mul(runtime.Revenue).Truncate(4)
-		dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.UserId, runtime.PoolSymbol, item.CurrencyType, roundBetRecordID(req.RoundId, item.BetId), amountCNY, decimal.Zero, revenueCNY)
+		if !d.testSkipPoolSideEffects {
+			dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.UserId, runtime.PoolSymbol, item.CurrencyType, roundBetRecordID(req.RoundId, item.BetId), amountCNY, decimal.Zero, revenueCNY)
+			d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
+		}
 		d.SaveBill(req.Agent, item.UserId, amount.Neg(), decimalFromCent(newCurrency).Truncate(2).InexactFloat64(), runtime.Symbol, "bet", item.CurrencyType, req.RoundId)
-		d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
 
 		resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
 	}
@@ -1011,6 +1171,13 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 		return resp, nil
 	}
 	d.expireRoundIfNeededLocked(round)
+	if gateOK, reason := d.ensureNoPendingCancelClaimsLocked(round, runtime); !gateOK {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = reason
+		resp.State = d.roundStateCode(round)
+		resp.BetDigest = d.roundBetDigest(round)
+		return resp, nil
+	}
 
 	digest := d.roundBetDigest(round)
 	resp.State = d.roundStateCode(round)
@@ -1266,6 +1433,21 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		}
 		return resp, nil
 	}
+	if gateOK, reason := d.ensureNoPendingCancelClaimsLocked(round, runtime); !gateOK {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.State = round.State
+		for _, item := range req.Items {
+			if item == nil {
+				continue
+			}
+			resp.Items = append(resp.Items, &services.SettlementItemResult{
+				UserId:  item.UserId,
+				Code:    services.ErrorCode_PARAMS_INVALID,
+				Message: reason,
+			})
+		}
+		return resp, nil
+	}
 	if round.State == string(financeStateSettled) || round.State == string(financeStateVoided) {
 		resp.Code = services.ErrorCode_PARAMS_INVALID
 		return resp, nil
@@ -1305,10 +1487,10 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		}
 	}
 
-	// 先按玩家和币种汇总已接受下注，结算请求必须与该集合完全一致。
+	// 先按玩家和币种汇总 ACTIVE 下注，结算请求必须与该集合完全一致（已取消的不计入）。
 	expectedBets := make(map[string]decimal.Decimal)
 	for _, item := range round.Bets {
-		if item == nil || !item.Accepted {
+		if !isActiveFinanceBet(item) {
 			continue
 		}
 		amount, parseErr := decimal.NewFromString(item.Amount)
@@ -1495,6 +1677,11 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 			round.Reservation.Status = string(financeStateSettled)
 		}
 		round.State = string(financeStateSettled)
+		for _, item := range round.Bets {
+			if isActiveFinanceBet(item) {
+				item.Status = financeBetStatusSettled
+			}
+		}
 	}
 	round.Settlement = &financeSettlement{
 		SettlementID: req.SettlementId,
@@ -1543,6 +1730,7 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 
 	resp.State = round.State
 	resp.BetDigest = d.roundBetDigest(round)
+	resp.BetRevision = round.BetRevision
 	resp.TotalBetCny = decimalString(d.totalBetCNY(round))
 	if round.Reservation != nil {
 		resp.ReservationId = round.Reservation.ReservationID
@@ -1559,6 +1747,513 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 		resp.SettlementId = round.Settlement.SettlementID
 	}
 	return resp, nil
+}
+
+// CancelBet 取消本局某玩家全部 ACTIVE 投注：钱包退款 + 冲销 agent_effect + 保持 BETTING。
+// 退款金额由资金侧计算；禁止用 PrePay/Settlement/VOID_REFUND 代替。
+func (d *LotteryService) CancelBet(_ context.Context, req *services.CancelBetRequest) (resp *services.CancelBetResponse, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			zap.L().Error("CancelBet panic", zap.Any("err", rec))
+			resp = &services.CancelBetResponse{Code: services.ErrorCode_SYSTEM_ERROR}
+			err = nil
+		}
+	}()
+
+	resp = &services.CancelBetResponse{
+		Code:    services.ErrorCode_OK,
+		RoundId: req.RoundId,
+		State:   string(financeStateBetting),
+	}
+	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || req.Agent == 0 || req.UserId == 0 || req.CurrencyType == "" {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "INVALID_REQUEST"
+		return resp, nil
+	}
+
+	runtime, code := d.resolveRuntime(req.Agent, req.GameId, req.Level)
+	if code != services.ErrorCode_OK {
+		resp.Code = code
+		resp.Reason = "INVALID_REQUEST"
+		return resp, nil
+	}
+
+	d.roundLock.Lock()
+	defer d.roundLock.Unlock()
+
+	round, ok := d.loadRoundLocked(req.RoundId)
+	if !ok {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "ROUND_NOT_FOUND"
+		return resp, nil
+	}
+	if code := d.validateRound(round, runtime); code != services.ErrorCode_OK {
+		resp.Code = code
+		resp.Reason = "INVALID_REQUEST"
+		return resp, nil
+	}
+	d.expireRoundIfNeededLocked(round)
+	return d.applyCancelBetLocked(round, runtime, req), nil
+}
+
+func (d *LotteryService) fillCancelBetResponse(
+	resp *services.CancelBetResponse,
+	round *financeRound,
+	prior *financeCancelRequest,
+) {
+	resp.Success = prior.Success
+	resp.RefundAmount = prior.RefundAmount
+	resp.Currency = prior.Currency
+	resp.BetDigest = prior.BetDigest
+	resp.BetRevision = prior.BetRevision
+	resp.CanceledBetIds = append([]string{}, prior.CanceledBetIDs...)
+	resp.State = round.State
+	resp.Reason = prior.Reason
+	if !prior.Success {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+	}
+}
+
+// testCancelWalletMarkers 仅测试：模拟 Redis cancel wallet marker。
+// key=requestId → 已入账。
+var testCancelWalletMarkers sync.Map
+
+// refundCancelWalletAtomic 原子退款：先入账再写 marker。marker 只代表已实际入账。
+func (d *LotteryService) refundCancelWalletAtomic(
+	userID uint32,
+	delta int64,
+	requestID string,
+	refundAmount string,
+) (newCurrency int64, alreadyDone bool, code services.ErrorCode) {
+	if requestID == "" {
+		return 0, false, services.ErrorCode_SYSTEM_ERROR
+	}
+	if d.testCurrencyHook != nil {
+		if _, loaded := testCancelWalletMarkers.LoadOrStore(requestID, refundAmount); loaded {
+			bal, c := d.testCurrencyHook(userID, 0)
+			return bal, true, c
+		}
+		bal, c := d.testCurrencyHook(userID, delta)
+		if c != services.ErrorCode_OK {
+			testCancelWalletMarkers.Delete(requestID)
+			return bal, false, c
+		}
+		return bal, false, c
+	}
+	if d.rds == nil {
+		return 0, false, services.ErrorCode_SYSTEM_ERROR
+	}
+	res, err := d.rds.RefundPlayerCurrencyWithCancelMarker(
+		userID,
+		delta,
+		cancelWalletMarkerKey(requestID),
+		refundAmount,
+		cancelWalletMarkerTTLSeconds,
+	)
+	if err != nil {
+		if errors.Is(err, dao.ErrPlayerNotCached) {
+			if loadCode := d.loadPlayerToCache(userID); loadCode != services.ErrorCode_OK {
+				return 0, false, loadCode
+			}
+			res, err = d.rds.RefundPlayerCurrencyWithCancelMarker(
+				userID,
+				delta,
+				cancelWalletMarkerKey(requestID),
+				refundAmount,
+				cancelWalletMarkerTTLSeconds,
+			)
+		}
+	}
+	if err != nil {
+		if errors.Is(err, dao.ErrInsufficientFunds) {
+			return res.NewCurrency, false, services.ErrorCode_NO_ENOUGH_MONEY
+		}
+		if errors.Is(err, dao.ErrPlayerNotCached) {
+			return 0, false, services.ErrorCode_SYSTEM_ERROR
+		}
+		zap.L().Error("cancel wallet atomic refund failed",
+			zap.Uint32("userId", userID),
+			zap.String("requestId", requestID),
+			zap.Error(err),
+		)
+		return 0, false, services.ErrorCode_SYSTEM_ERROR
+	}
+	return res.NewCurrency, res.AlreadyDone, services.ErrorCode_OK
+}
+
+// ensureNoPendingCancelClaimsLocked 恢复未完成 CLAIM；若仍有 CLAIMED 则阻断 Bet/PrePay/Settlement。
+func (d *LotteryService) ensureNoPendingCancelClaimsLocked(
+	round *financeRound,
+	runtime *roundRuntime,
+) (ok bool, reason string) {
+	if round == nil || len(round.CancelRequests) == 0 {
+		return true, ""
+	}
+	for requestID, claim := range round.CancelRequests {
+		if claim == nil || claim.Status != financeCancelStatusClaimed {
+			continue
+		}
+		req := &services.CancelBetRequest{
+			RequestId:    requestID,
+			RoundId:      round.RoundID,
+			GameId:       round.GameID,
+			Agent:        round.Agent,
+			Level:        round.Level,
+			UserId:       claim.UserID,
+			CurrencyType: claim.CurrencyType,
+		}
+		_ = d.resumeClaimedCancelBetLocked(round, runtime, req, claim)
+		// resume 可能已把同一对象标为 COMPLETED
+		if claim.Status == financeCancelStatusClaimed {
+			return false, "CANCEL_PENDING"
+		}
+	}
+	return true, ""
+}
+
+func betOriginalEffectAndRevenue(item *financeBetSnapshot, runtime *roundRuntime) (effectCNY, revenueCNY decimal.Decimal) {
+	if item.AgentEffectAmountCNY != "" {
+		if parsed, err := decimal.NewFromString(item.AgentEffectAmountCNY); err == nil {
+			effectCNY = parsed
+		}
+	}
+	if effectCNY.IsZero() && item.AmountCNY != "" {
+		if parsed, err := decimal.NewFromString(item.AmountCNY); err == nil {
+			effectCNY = parsed
+		}
+	}
+	if item.AgentRevenueAmountCNY != "" {
+		if parsed, err := decimal.NewFromString(item.AgentRevenueAmountCNY); err == nil {
+			revenueCNY = parsed
+			return effectCNY, revenueCNY
+		}
+	}
+	// 旧数据未保存税收原值时，仅作为兼容回退；新下注必须写入 AgentRevenueAmountCNY。
+	revenueCNY = effectCNY.Mul(runtime.Revenue).Truncate(4)
+	return effectCNY, revenueCNY
+}
+
+// applyCancelBetLocked 执行 CancelBet 核心逻辑；调用方必须已持有 roundLock。
+//
+// 持久化顺序（防重复退款）：
+//  1. CLAIM：注单改 CANCELED + effect 冲销流水入 round + revision++，先 saveRound
+//  2. 钱包退款（Redis SETNX 标记防崩溃重入）
+//  3. COMPLETED：再 saveRound；若失败则回滚钱包并恢复注单后返回错误
+func (d *LotteryService) applyCancelBetLocked(
+	round *financeRound,
+	runtime *roundRuntime,
+	req *services.CancelBetRequest,
+) *services.CancelBetResponse {
+	resp := &services.CancelBetResponse{
+		Code:    services.ErrorCode_OK,
+		RoundId: req.RoundId,
+		State:   round.State,
+	}
+	if round.CancelRequests == nil {
+		round.CancelRequests = make(map[string]*financeCancelRequest)
+	}
+	if round.EffectCancels == nil {
+		round.EffectCancels = make(map[string]*financeEffectCancel)
+	}
+
+	if prior, exists := round.CancelRequests[req.RequestId]; exists {
+		if prior.UserID != req.UserId || prior.CurrencyType != req.CurrencyType {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			resp.Reason = "REQUEST_ID_CONFLICT"
+			resp.State = round.State
+			resp.BetDigest = d.roundBetDigest(round)
+			resp.BetRevision = round.BetRevision
+			return resp
+		}
+		if prior.Status == financeCancelStatusCompleted || prior.Success {
+			d.fillCancelBetResponse(resp, round, prior)
+			return resp
+		}
+		if prior.Status == financeCancelStatusClaimed {
+			return d.resumeClaimedCancelBetLocked(round, runtime, req, prior)
+		}
+		d.fillCancelBetResponse(resp, round, prior)
+		return resp
+	}
+
+	if round.State != string(financeStateBetting) {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "ROUND_NOT_BETTING"
+		resp.State = round.State
+		resp.BetDigest = d.roundBetDigest(round)
+		resp.BetRevision = round.BetRevision
+		return resp
+	}
+
+	digest := d.roundBetDigest(round)
+	resp.BetDigest = digest
+	resp.BetRevision = round.BetRevision
+	resp.State = round.State
+	if req.ExpectedBetDigest != "" && req.ExpectedBetDigest != digest {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "BET_MISMATCH"
+		return resp
+	}
+
+	active := make([]*financeBetSnapshot, 0)
+	refund := decimal.Zero
+	for _, item := range round.Bets {
+		if !isActiveFinanceBet(item) {
+			continue
+		}
+		if item.UserID != req.UserId || item.CurrencyType != req.CurrencyType {
+			continue
+		}
+		amount, parseErr := decimal.NewFromString(item.Amount)
+		if parseErr != nil || !amount.GreaterThan(decimal.Zero) {
+			resp.Code = services.ErrorCode_SYSTEM_ERROR
+			resp.Reason = "INVALID_BET_AMOUNT"
+			return resp
+		}
+		active = append(active, item)
+		refund = refund.Add(amount)
+	}
+	if len(active) == 0 {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "NO_ACTIVE_BETS"
+		return resp
+	}
+
+	canceledIDs := make([]string, 0, len(active))
+	effectApplied := make([]*financeEffectCancel, 0, len(active))
+	for _, item := range active {
+		if _, dup := round.EffectCancels[item.BetID]; dup {
+			resp.Code = services.ErrorCode_SYSTEM_ERROR
+			resp.Reason = "EFFECT_CANCEL_DUP"
+			return resp
+		}
+		effectCNY, revenueCNY := betOriginalEffectAndRevenue(item, runtime)
+		recordKey := cancelEffectRecordKey(req.RoundId, item.BetID)
+		effect := &financeEffectCancel{
+			BetID:            item.BetID,
+			RecordKey:        recordKey,
+			UserID:           item.UserID,
+			CurrencyType:     item.CurrencyType,
+			EffectAmountCNY:  decimalString(effectCNY.Neg()),
+			RevenueAmountCNY: decimalString(revenueCNY.Neg()),
+			CreatedAt:        time.Now().Unix(),
+		}
+		if !d.testSkipPoolSideEffects {
+			dao.CacheIns().ApplyPoolChange(
+				int64(req.Agent),
+				item.UserID,
+				runtime.PoolSymbol,
+				item.CurrencyType,
+				recordKey,
+				effectCNY.Neg(),
+				decimal.Zero,
+				revenueCNY.Neg(),
+			)
+		}
+		round.EffectCancels[item.BetID] = effect
+		effectApplied = append(effectApplied, effect)
+		item.Status = financeBetStatusCanceled
+		item.Accepted = false
+		item.Message = "canceled"
+		canceledIDs = append(canceledIDs, item.BetID)
+	}
+
+	round.BetRevision++
+	newDigest := d.roundBetDigest(round)
+	round.State = string(financeStateBetting)
+	refundStr := refund.Truncate(2).String()
+	claimed := &financeCancelRequest{
+		RequestID:      req.RequestId,
+		UserID:         req.UserId,
+		CurrencyType:   req.CurrencyType,
+		Status:         financeCancelStatusClaimed,
+		Success:        false,
+		WalletRefunded: false,
+		RefundAmount:   refundStr,
+		BetDigest:      newDigest,
+		BetRevision:    round.BetRevision,
+		CanceledBetIDs: append([]string{}, canceledIDs...),
+	}
+	round.CancelRequests[req.RequestId] = claimed
+
+	// 关键：先持久化 CLAIM（注单已取消），再动钱包。
+	if err := d.saveRoundLocked(round); err != nil {
+		d.rollbackCancelClaimMemory(round, runtime, req, claimed, effectApplied, active, refund)
+		resp.Code = services.ErrorCode_SYSTEM_ERROR
+		resp.Reason = "PERSIST_CLAIM_FAILED"
+		resp.State = round.State
+		resp.BetDigest = d.roundBetDigest(round)
+		resp.BetRevision = round.BetRevision
+		return resp
+	}
+
+	return d.finishCancelBetAfterClaimLocked(round, runtime, req, claimed, refund)
+}
+
+func (d *LotteryService) rollbackCancelClaimMemory(
+	round *financeRound,
+	runtime *roundRuntime,
+	req *services.CancelBetRequest,
+	claimed *financeCancelRequest,
+	effectApplied []*financeEffectCancel,
+	active []*financeBetSnapshot,
+	_ decimal.Decimal,
+) {
+	for _, effect := range effectApplied {
+		if !d.testSkipPoolSideEffects {
+			effectAmt, _ := decimal.NewFromString(effect.EffectAmountCNY)
+			revenueAmt, _ := decimal.NewFromString(effect.RevenueAmountCNY)
+			dao.CacheIns().ApplyPoolChange(
+				int64(req.Agent),
+				effect.UserID,
+				runtime.PoolSymbol,
+				effect.CurrencyType,
+				effect.RecordKey+":rollback",
+				effectAmt.Neg(),
+				decimal.Zero,
+				revenueAmt.Neg(),
+			)
+		}
+		delete(round.EffectCancels, effect.BetID)
+	}
+	for _, item := range active {
+		item.Status = financeBetStatusActive
+		item.Accepted = true
+		item.Message = ""
+	}
+	if claimed != nil && claimed.BetRevision > 0 {
+		round.BetRevision = claimed.BetRevision - 1
+	}
+	delete(round.CancelRequests, req.RequestId)
+}
+
+func (d *LotteryService) resumeClaimedCancelBetLocked(
+	round *financeRound,
+	runtime *roundRuntime,
+	req *services.CancelBetRequest,
+	prior *financeCancelRequest,
+) *services.CancelBetResponse {
+	refund, err := decimal.NewFromString(prior.RefundAmount)
+	if err != nil {
+		resp := &services.CancelBetResponse{
+			Code:    services.ErrorCode_SYSTEM_ERROR,
+			RoundId: req.RoundId,
+			State:   round.State,
+			Reason:  "INVALID_CLAIM_REFUND",
+		}
+		return resp
+	}
+	return d.finishCancelBetAfterClaimLocked(round, runtime, req, prior, refund)
+}
+
+func (d *LotteryService) finishCancelBetAfterClaimLocked(
+	round *financeRound,
+	runtime *roundRuntime,
+	req *services.CancelBetRequest,
+	claimed *financeCancelRequest,
+	refund decimal.Decimal,
+) *services.CancelBetResponse {
+	resp := &services.CancelBetResponse{
+		Code:        services.ErrorCode_OK,
+		RoundId:     req.RoundId,
+		State:       round.State,
+		BetDigest:   claimed.BetDigest,
+		BetRevision: claimed.BetRevision,
+	}
+
+	walletAfter := decimal.Zero
+	if !claimed.WalletRefunded {
+		newCurrency, alreadyDone, currencyCode := d.refundCancelWalletAtomic(
+			req.UserId,
+			toCentDelta(refund),
+			req.RequestId,
+			claimed.RefundAmount,
+		)
+		if currencyCode != services.ErrorCode_OK {
+			// 钱包未入账（marker 也不会存在）：撤销 CLAIM，恢复 ACTIVE。
+			d.undoCancelClaimDurable(round, runtime, req, claimed)
+			resp.Code = currencyCode
+			resp.Reason = "BALANCE_UPDATE_FAILED"
+			resp.State = round.State
+			resp.BetDigest = d.roundBetDigest(round)
+			resp.BetRevision = round.BetRevision
+			return resp
+		}
+		walletAfter = decimalFromCent(newCurrency).Truncate(2)
+		claimed.WalletRefunded = true
+		claimed.Currency = walletAfter.String()
+		if !alreadyDone {
+			d.SaveBill(req.Agent, req.UserId, refund, walletAfter.InexactFloat64(), runtime.Symbol, "bet_cancel", req.CurrencyType, req.RoundId)
+		}
+		if err := d.saveRoundLocked(round); err != nil {
+			zap.L().Error("CancelBet persist after wallet failed",
+				zap.String("roundId", req.RoundId),
+				zap.String("requestId", req.RequestId),
+				zap.Error(err),
+			)
+		}
+	} else if claimed.Currency != "" {
+		if parsed, err := decimal.NewFromString(claimed.Currency); err == nil {
+			walletAfter = parsed
+		}
+	}
+
+	claimed.Status = financeCancelStatusCompleted
+	claimed.Success = true
+	claimed.CompletedAt = time.Now().Unix()
+	claimed.BetDigest = d.roundBetDigest(round)
+	claimed.BetRevision = round.BetRevision
+	round.State = string(financeStateBetting)
+
+	if err := d.saveRoundLocked(round); err != nil {
+		zap.L().Error("CancelBet persist COMPLETED failed",
+			zap.String("roundId", req.RoundId),
+			zap.String("requestId", req.RequestId),
+			zap.Error(err),
+		)
+		// 钱包与 CLAIM 已持久化时，对客户端仍返回成功（幂等重试可继续拿 COMPLETED）。
+		// 若 COMPLETED 未写入，重试会走 CLAIMED resume 且因 wallet marker 跳过退款。
+	}
+
+	if !d.testSkipPoolSideEffects && d.pcr != nil {
+		d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
+	}
+
+	resp.Success = true
+	resp.RefundAmount = claimed.RefundAmount
+	resp.Currency = claimed.Currency
+	resp.BetDigest = claimed.BetDigest
+	resp.BetRevision = claimed.BetRevision
+	resp.CanceledBetIds = append([]string{}, claimed.CanceledBetIDs...)
+	resp.State = round.State
+	resp.Reason = ""
+	return resp
+}
+
+func (d *LotteryService) undoCancelClaimDurable(
+	round *financeRound,
+	runtime *roundRuntime,
+	req *services.CancelBetRequest,
+	claimed *financeCancelRequest,
+) {
+	active := make([]*financeBetSnapshot, 0, len(claimed.CanceledBetIDs))
+	effects := make([]*financeEffectCancel, 0, len(claimed.CanceledBetIDs))
+	for _, betID := range claimed.CanceledBetIDs {
+		if bet := round.Bets[betID]; bet != nil {
+			active = append(active, bet)
+		}
+		if effect := round.EffectCancels[betID]; effect != nil {
+			effects = append(effects, effect)
+		}
+	}
+	d.rollbackCancelClaimMemory(round, runtime, req, claimed, effects, active, decimal.Zero)
+	if err := d.saveRoundLocked(round); err != nil {
+		zap.L().Error("CancelBet undo claim persist failed",
+			zap.String("roundId", req.RoundId),
+			zap.String("requestId", req.RequestId),
+			zap.Error(err),
+		)
+	}
 }
 
 func (d *LotteryService) isActiveLiabilityCap(round *financeRound) bool {

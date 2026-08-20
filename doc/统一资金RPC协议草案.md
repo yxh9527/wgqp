@@ -6,12 +6,19 @@
 
 统一资金服务只处理真人玩家的下注、奖池预留、结算、退款和资金状态查询，不生成游戏结果，也不负责游戏控制策略。
 
-当前提供四个 RPC：
+当前提供五个 RPC：
 
 1. `Bet`：扣除玩家余额并登记本局下注。
 2. `PrePay`：按冻结后的下注集合和候选结果申请赔付预留。
 3. `Settlement`：正常赔付或整局全额退款。
 4. `GetRoundFinanceState`：查询牌局资金状态，用于超时确认、故障后的状态核对和人工审核。
+5. `CancelBet`：百人玩家主动取消本局全部 `ACTIVE` 投注；退款与 `agent_effect` 冲销由资金侧计算。禁止用 `PrePay` / `Settlement` / `VOID_REFUND` 代替。成功后牌局状态仍为 `BETTING`，`betRevision` 递增。
+
+`CancelBet` 持久化顺序：先将注单标为 `CANCELED` 并写入 `CLAIMED` 记录 → **钱包入账与 marker 同一 Lua 原子操作（先入账再写 marker）** → 标记 `COMPLETED`。未完成的 `CLAIMED` 会阻断 `Bet` / `PrePay` / `Settlement`（返回 `CANCEL_PENDING`）并尝试恢复。`Bet` 硬校验 betId 中的 `:rev:{n}:` 必须等于当前 `betRevision`。
+
+游戏服 CancelBet `requestId` 绑定取消前 `betRevision` 代次，并用 pending 表保证超时重试复用同一 ID；成功或明确失败后清除，同局再取消使用新代次。
+
+仍存差距：`ApplyPoolChange` 仍是进程内聚合、定时落 Redis；跨 lottery 实例没有分布式轮次锁。
 
 赔付预留只用于单人房游戏，默认有效期为 300 秒，不提供续期和主动释放接口。有效预留只能通过 `Settlement(NORMAL)`、`Settlement(VOID_REFUND)` 或到期自动回收结束。
 
@@ -80,6 +87,7 @@ AvailablePool = E - P - R - Q
 | 操作                        |   E 有效下注 |         P 总赔付 |       R 税收 |       Q 有效预留 |
 | --------------------------- | -----------: | ---------------: | -----------: | ---------------: |
 | `Bet` 成功                | 增加下注 CNY |             不变 | 增加下注税收 |             不变 |
+| `CancelBet` 成功          | 冲销 ACTIVE 下注 |         不变 | 冲销对应税收 |             不变 |
 | `PrePay` 成功             |         不变 |             不变 |         不变 | 增加预计赔付 CNY |
 | 超时自动回收              |         不变 |             不变 |         不变 |     减少对应预留 |
 | `Settlement(NORMAL)`      |         不变 | 增加实际赔付 CNY |         不变 |     释放整笔预留 |

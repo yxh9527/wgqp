@@ -15,6 +15,9 @@ service LotteryService {
     rpc Settlement(SettlementRequest) returns (SettlementResponse);
     // 查询本局资金状态，用于 RPC 超时确认和人工审核。
     rpc GetRoundFinanceState(GetRoundFinanceStateReq) returns (GetRoundFinanceStateResp);
+    // 百人玩家主动取消本局 ACTIVE 投注；退款金额由资金侧按 ACTIVE 投注计算，不由游戏服传入。
+    // 禁止用 PrePay/Settlement/VOID_REFUND 代替本接口。成功后牌局仍保持 BETTING。
+    rpc CancelBet(CancelBetRequest) returns (CancelBetResponse);
 }
 
 // 单笔下注。金额使用玩家币种的十进制字符串，最多保留两位小数。
@@ -190,4 +193,35 @@ message GetRoundFinanceStateResp {
     string totalReservedCny = 10;
     string reservationMode = 11;
     repeated PrePayItem reservedItems = 12;
+    // 本局下注修订号；取消成功后递增，新 betId 必须带上该 revision。
+    int64 betRevision = 13;
+}
+
+message CancelBetRequest {
+    // 强幂等键：重复请求不重复退款、不重复冲销 agent_effect。
+    string requestId = 1;
+    string roundId = 2;
+    uint32 gameId = 3;
+    uint32 agent = 4;
+    uint32 level = 5;
+    uint32 userId = 6;
+    string currencyType = 7;
+    // 调用方看到的下注摘要；用于发现本地与资金侧不一致。
+    string expectedBetDigest = 8;
+}
+
+message CancelBetResponse {
+    base.error_code code = 1;
+    bool success = 2;
+    // 资金侧按本局该玩家全部 ACTIVE 投注汇总的退款金额。
+    string refundAmount = 3;
+    // 退款后的玩家钱包余额（与 SettlementItemResult.currency 同口径）。
+    string currency = 4;
+    string betDigest = 5;
+    int64 betRevision = 6;
+    repeated string canceledBetIds = 7;
+    string roundId = 8;
+    // 成功后仍为 BETTING。
+    string state = 9;
+    string reason = 10;
 }

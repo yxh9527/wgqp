@@ -46,6 +46,40 @@ redis.call("EXPIRE", playerKey, ARGV[3])
 redis.call("SADD", KEYS[2], ARGV[4])
 return {2, updated}
 `)
+	// refundWithCancelMarkerScript：先入账再写 marker。
+	// marker 仅表示钱包已实际入账；若 marker 已存在则跳过入账（幂等重试）。
+	// 返回：{0,0} 未缓存；{1,bal} 余额不足；{2,bal} 本次新入账；{3,bal} 已入账过。
+	refundWithCancelMarkerScript = redis.NewScript(`
+local playerKey = KEYS[1]
+local dirtyKey = KEYS[2]
+local markerKey = KEYS[3]
+local delta = tonumber(ARGV[1])
+local exp = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local playerId = ARGV[4]
+local markerValue = ARGV[5]
+local markerTTL = tonumber(ARGV[6])
+if redis.call("EXISTS", markerKey) == 1 then
+    local current = tonumber(redis.call("HGET", playerKey, "currency") or "0")
+    return {3, current}
+end
+if redis.call("HEXISTS", playerKey, "id") == 0 then
+    return {0, 0}
+end
+local current = tonumber(redis.call("HGET", playerKey, "currency") or "0")
+local updated = current + delta
+if updated < 0 then
+    return {1, current}
+end
+redis.call("HINCRBY", playerKey, "currency", delta)
+if exp ~= 0 then
+    redis.call("HINCRBY", playerKey, "exp", exp)
+end
+redis.call("EXPIRE", playerKey, ttl)
+redis.call("SADD", dirtyKey, playerId)
+redis.call("SET", markerKey, markerValue, "EX", markerTTL)
+return {2, updated}
+`)
 	// tryReservePoolScript 原子检查可用奖池并增加预留，避免并发预赔透支。
 	tryReservePoolScript = redis.NewScript(`
 local current = tonumber(redis.call("ZSCORE", KEYS[1], ARGV[1]) or "0")
@@ -289,6 +323,62 @@ func (rd *RedisDao) UpdatePlayerCurrency(playerId uint32, currencyDelta int64, e
 	}
 }
 
+// CancelWalletRefundResult 描述 CancelBet 钱包原子退款结果。
+type CancelWalletRefundResult struct {
+	// AlreadyDone 为 true 表示 marker 已存在，本次未再次入账。
+	AlreadyDone bool
+	NewCurrency int64
+}
+
+// RefundPlayerCurrencyWithCancelMarker 原子完成：余额入账 + 写入 cancel wallet marker。
+// marker 只在入账成功后写入；重试时若 marker 已存在则不再入账。
+func (rd *RedisDao) RefundPlayerCurrencyWithCancelMarker(
+	playerId uint32,
+	currencyDelta int64,
+	markerKey string,
+	markerValue string,
+	markerTTLSeconds int32,
+) (CancelWalletRefundResult, error) {
+	pID := "player_" + strconv.FormatUint(uint64(playerId), 10)
+	result, err := refundWithCancelMarkerScript.Run(
+		context.Background(),
+		rd.cli,
+		[]string{pID, "dirty_list_imp", markerKey},
+		currencyDelta,
+		0,
+		int64((20*time.Minute)/time.Second),
+		playerId,
+		markerValue,
+		int64(markerTTLSeconds),
+	).Slice()
+	if err != nil {
+		return CancelWalletRefundResult{}, err
+	}
+	if len(result) != 2 {
+		return CancelWalletRefundResult{}, fmt.Errorf("unexpected cancel refund script result")
+	}
+	status, ok := result[0].(int64)
+	if !ok {
+		return CancelWalletRefundResult{}, fmt.Errorf("unexpected cancel refund script status")
+	}
+	value, ok := result[1].(int64)
+	if !ok {
+		return CancelWalletRefundResult{}, fmt.Errorf("unexpected cancel refund script balance")
+	}
+	switch status {
+	case 0:
+		return CancelWalletRefundResult{}, ErrPlayerNotCached
+	case 1:
+		return CancelWalletRefundResult{NewCurrency: value}, ErrInsufficientFunds
+	case 2:
+		return CancelWalletRefundResult{AlreadyDone: false, NewCurrency: value}, nil
+	case 3:
+		return CancelWalletRefundResult{AlreadyDone: true, NewCurrency: value}, nil
+	default:
+		return CancelWalletRefundResult{}, fmt.Errorf("unknown cancel refund script status: %d", status)
+	}
+}
+
 func (rd *RedisDao) GetPlayerCurrency(playerId uint32) (newCurrency int64, err error) {
 	pID := "player_" + strconv.FormatUint(uint64(playerId), 10)
 	pipe := rd.cli.Pipeline()
@@ -509,6 +599,17 @@ func (rd *RedisDao) Set(key, value string, timeout int32) error {
 	}
 
 	return rd.cli.Set(context.Background(), key, value, to).Err()
+}
+
+// SetNX 仅当 key 不存在时写入；用于 CancelBet 钱包退款幂等标记。
+func (rd *RedisDao) SetNX(key, value string, timeout int32) (bool, error) {
+	var to time.Duration
+	if timeout > 0 {
+		to = time.Duration(timeout) * time.Second
+	} else {
+		to = 0
+	}
+	return rd.cli.SetNX(context.Background(), key, value, to).Result()
 }
 
 func (rd *RedisDao) Del(key string) error {

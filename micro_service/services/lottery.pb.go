@@ -1100,8 +1100,10 @@ type GetRoundFinanceStateResp struct {
 	TotalReservedCny string        `protobuf:"bytes,10,opt,name=totalReservedCny,proto3" json:"totalReservedCny,omitempty"`
 	ReservationMode  string        `protobuf:"bytes,11,opt,name=reservationMode,proto3" json:"reservationMode,omitempty"`
 	ReservedItems    []*PrePayItem `protobuf:"bytes,12,rep,name=reservedItems,proto3" json:"reservedItems,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// 本局下注修订号；取消成功后递增，新 betId 必须带上该 revision。
+	BetRevision   int64 `protobuf:"varint,13,opt,name=betRevision,proto3" json:"betRevision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetRoundFinanceStateResp) Reset() {
@@ -1218,6 +1220,234 @@ func (x *GetRoundFinanceStateResp) GetReservedItems() []*PrePayItem {
 	return nil
 }
 
+func (x *GetRoundFinanceStateResp) GetBetRevision() int64 {
+	if x != nil {
+		return x.BetRevision
+	}
+	return 0
+}
+
+type CancelBetRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 强幂等键：重复请求不重复退款、不重复冲销 agent_effect。
+	RequestId    string `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	RoundId      string `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	GameId       uint32 `protobuf:"varint,3,opt,name=gameId,proto3" json:"gameId,omitempty"`
+	Agent        uint32 `protobuf:"varint,4,opt,name=agent,proto3" json:"agent,omitempty"`
+	Level        uint32 `protobuf:"varint,5,opt,name=level,proto3" json:"level,omitempty"`
+	UserId       uint32 `protobuf:"varint,6,opt,name=userId,proto3" json:"userId,omitempty"`
+	CurrencyType string `protobuf:"bytes,7,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
+	// 调用方看到的下注摘要；用于发现本地与资金侧不一致。
+	ExpectedBetDigest string `protobuf:"bytes,8,opt,name=expectedBetDigest,proto3" json:"expectedBetDigest,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CancelBetRequest) Reset() {
+	*x = CancelBetRequest{}
+	mi := &file_lottery_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelBetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelBetRequest) ProtoMessage() {}
+
+func (x *CancelBetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelBetRequest.ProtoReflect.Descriptor instead.
+func (*CancelBetRequest) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CancelBetRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CancelBetRequest) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *CancelBetRequest) GetGameId() uint32 {
+	if x != nil {
+		return x.GameId
+	}
+	return 0
+}
+
+func (x *CancelBetRequest) GetAgent() uint32 {
+	if x != nil {
+		return x.Agent
+	}
+	return 0
+}
+
+func (x *CancelBetRequest) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *CancelBetRequest) GetUserId() uint32 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *CancelBetRequest) GetCurrencyType() string {
+	if x != nil {
+		return x.CurrencyType
+	}
+	return ""
+}
+
+func (x *CancelBetRequest) GetExpectedBetDigest() string {
+	if x != nil {
+		return x.ExpectedBetDigest
+	}
+	return ""
+}
+
+type CancelBetResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Code    ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	Success bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	// 资金侧按本局该玩家全部 ACTIVE 投注汇总的退款金额。
+	RefundAmount string `protobuf:"bytes,3,opt,name=refundAmount,proto3" json:"refundAmount,omitempty"`
+	// 退款后的玩家钱包余额（与 SettlementItemResult.currency 同口径）。
+	Currency       string   `protobuf:"bytes,4,opt,name=currency,proto3" json:"currency,omitempty"`
+	BetDigest      string   `protobuf:"bytes,5,opt,name=betDigest,proto3" json:"betDigest,omitempty"`
+	BetRevision    int64    `protobuf:"varint,6,opt,name=betRevision,proto3" json:"betRevision,omitempty"`
+	CanceledBetIds []string `protobuf:"bytes,7,rep,name=canceledBetIds,proto3" json:"canceledBetIds,omitempty"`
+	RoundId        string   `protobuf:"bytes,8,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	// 成功后仍为 BETTING。
+	State         string `protobuf:"bytes,9,opt,name=state,proto3" json:"state,omitempty"`
+	Reason        string `protobuf:"bytes,10,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelBetResponse) Reset() {
+	*x = CancelBetResponse{}
+	mi := &file_lottery_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelBetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelBetResponse) ProtoMessage() {}
+
+func (x *CancelBetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelBetResponse.ProtoReflect.Descriptor instead.
+func (*CancelBetResponse) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *CancelBetResponse) GetCode() ErrorCode {
+	if x != nil {
+		return x.Code
+	}
+	return ErrorCode_OK
+}
+
+func (x *CancelBetResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *CancelBetResponse) GetRefundAmount() string {
+	if x != nil {
+		return x.RefundAmount
+	}
+	return ""
+}
+
+func (x *CancelBetResponse) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+func (x *CancelBetResponse) GetBetDigest() string {
+	if x != nil {
+		return x.BetDigest
+	}
+	return ""
+}
+
+func (x *CancelBetResponse) GetBetRevision() int64 {
+	if x != nil {
+		return x.BetRevision
+	}
+	return 0
+}
+
+func (x *CancelBetResponse) GetCanceledBetIds() []string {
+	if x != nil {
+		return x.CanceledBetIds
+	}
+	return nil
+}
+
+func (x *CancelBetResponse) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *CancelBetResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *CancelBetResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 var File_lottery_proto protoreflect.FileDescriptor
 
 const file_lottery_proto_rawDesc = "" +
@@ -1313,7 +1543,7 @@ const file_lottery_proto_rawDesc = "" +
 	"\fsettlementId\x18\x04 \x01(\tR\fsettlementId\x123\n" +
 	"\x05items\x18\x05 \x03(\v2\x1d.lottery.SettlementItemResultR\x05items\"3\n" +
 	"\x17GetRoundFinanceStateReq\x12\x18\n" +
-	"\aroundId\x18\x01 \x01(\tR\aroundId\"\xcb\x03\n" +
+	"\aroundId\x18\x01 \x01(\tR\aroundId\"\xed\x03\n" +
 	"\x18GetRoundFinanceStateResp\x12$\n" +
 	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
 	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x14\n" +
@@ -1327,13 +1557,36 @@ const file_lottery_proto_rawDesc = "" +
 	"\x10totalReservedCny\x18\n" +
 	" \x01(\tR\x10totalReservedCny\x12(\n" +
 	"\x0freservationMode\x18\v \x01(\tR\x0freservationMode\x129\n" +
-	"\rreservedItems\x18\f \x03(\v2\x13.lottery.PrePayItemR\rreservedItems2\xa1\x02\n" +
+	"\rreservedItems\x18\f \x03(\v2\x13.lottery.PrePayItemR\rreservedItems\x12 \n" +
+	"\vbetRevision\x18\r \x01(\x03R\vbetRevision\"\xf8\x01\n" +
+	"\x10CancelBetRequest\x12\x1c\n" +
+	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x16\n" +
+	"\x06gameId\x18\x03 \x01(\rR\x06gameId\x12\x14\n" +
+	"\x05agent\x18\x04 \x01(\rR\x05agent\x12\x14\n" +
+	"\x05level\x18\x05 \x01(\rR\x05level\x12\x16\n" +
+	"\x06userId\x18\x06 \x01(\rR\x06userId\x12\"\n" +
+	"\fcurrencyType\x18\a \x01(\tR\fcurrencyType\x12,\n" +
+	"\x11expectedBetDigest\x18\b \x01(\tR\x11expectedBetDigest\"\xc3\x02\n" +
+	"\x11CancelBetResponse\x12$\n" +
+	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\"\n" +
+	"\frefundAmount\x18\x03 \x01(\tR\frefundAmount\x12\x1a\n" +
+	"\bcurrency\x18\x04 \x01(\tR\bcurrency\x12\x1c\n" +
+	"\tbetDigest\x18\x05 \x01(\tR\tbetDigest\x12 \n" +
+	"\vbetRevision\x18\x06 \x01(\x03R\vbetRevision\x12&\n" +
+	"\x0ecanceledBetIds\x18\a \x03(\tR\x0ecanceledBetIds\x12\x18\n" +
+	"\aroundId\x18\b \x01(\tR\aroundId\x12\x14\n" +
+	"\x05state\x18\t \x01(\tR\x05state\x12\x16\n" +
+	"\x06reason\x18\n" +
+	" \x01(\tR\x06reason2\xe5\x02\n" +
 	"\x0eLotteryService\x120\n" +
 	"\x03Bet\x12\x13.lottery.BetRequest\x1a\x14.lottery.BetResponse\x129\n" +
 	"\x06PrePay\x12\x16.lottery.PrePayRequest\x1a\x17.lottery.PrePayResponse\x12E\n" +
 	"\n" +
 	"Settlement\x12\x1a.lottery.SettlementRequest\x1a\x1b.lottery.SettlementResponse\x12[\n" +
-	"\x14GetRoundFinanceState\x12 .lottery.GetRoundFinanceStateReq\x1a!.lottery.GetRoundFinanceStateRespB\x15Z\x13./services;servicesb\x06proto3"
+	"\x14GetRoundFinanceState\x12 .lottery.GetRoundFinanceStateReq\x1a!.lottery.GetRoundFinanceStateResp\x12B\n" +
+	"\tCancelBet\x12\x19.lottery.CancelBetRequest\x1a\x1a.lottery.CancelBetResponseB\x15Z\x13./services;servicesb\x06proto3"
 
 var (
 	file_lottery_proto_rawDescOnce sync.Once
@@ -1347,7 +1600,7 @@ func file_lottery_proto_rawDescGZIP() []byte {
 	return file_lottery_proto_rawDescData
 }
 
-var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_lottery_proto_goTypes = []any{
 	(*BetItem)(nil),                  // 0: lottery.BetItem
 	(*BetRequest)(nil),               // 1: lottery.BetRequest
@@ -1362,34 +1615,39 @@ var file_lottery_proto_goTypes = []any{
 	(*SettlementResponse)(nil),       // 10: lottery.SettlementResponse
 	(*GetRoundFinanceStateReq)(nil),  // 11: lottery.GetRoundFinanceStateReq
 	(*GetRoundFinanceStateResp)(nil), // 12: lottery.GetRoundFinanceStateResp
-	(ErrorCode)(0),                   // 13: base.error_code
+	(*CancelBetRequest)(nil),         // 13: lottery.CancelBetRequest
+	(*CancelBetResponse)(nil),        // 14: lottery.CancelBetResponse
+	(ErrorCode)(0),                   // 15: base.error_code
 }
 var file_lottery_proto_depIdxs = []int32{
 	0,  // 0: lottery.BetRequest.items:type_name -> lottery.BetItem
-	13, // 1: lottery.BetItemResult.code:type_name -> base.error_code
-	13, // 2: lottery.BetResponse.code:type_name -> base.error_code
+	15, // 1: lottery.BetItemResult.code:type_name -> base.error_code
+	15, // 2: lottery.BetResponse.code:type_name -> base.error_code
 	2,  // 3: lottery.BetResponse.items:type_name -> lottery.BetItemResult
 	4,  // 4: lottery.PrePayRequest.items:type_name -> lottery.PrePayItem
-	13, // 5: lottery.PrePayResponse.code:type_name -> base.error_code
+	15, // 5: lottery.PrePayResponse.code:type_name -> base.error_code
 	7,  // 6: lottery.SettlementRequest.items:type_name -> lottery.SettlementItem
-	13, // 7: lottery.SettlementItemResult.code:type_name -> base.error_code
-	13, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
+	15, // 7: lottery.SettlementItemResult.code:type_name -> base.error_code
+	15, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
 	9,  // 9: lottery.SettlementResponse.items:type_name -> lottery.SettlementItemResult
-	13, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
+	15, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
 	4,  // 11: lottery.GetRoundFinanceStateResp.reservedItems:type_name -> lottery.PrePayItem
-	1,  // 12: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
-	5,  // 13: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
-	8,  // 14: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
-	11, // 15: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
-	3,  // 16: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
-	6,  // 17: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
-	10, // 18: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
-	12, // 19: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
-	16, // [16:20] is the sub-list for method output_type
-	12, // [12:16] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	15, // 12: lottery.CancelBetResponse.code:type_name -> base.error_code
+	1,  // 13: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
+	5,  // 14: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
+	8,  // 15: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
+	11, // 16: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
+	13, // 17: lottery.LotteryService.CancelBet:input_type -> lottery.CancelBetRequest
+	3,  // 18: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
+	6,  // 19: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
+	10, // 20: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
+	12, // 21: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
+	14, // 22: lottery.LotteryService.CancelBet:output_type -> lottery.CancelBetResponse
+	18, // [18:23] is the sub-list for method output_type
+	13, // [13:18] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_lottery_proto_init() }
@@ -1404,7 +1662,7 @@ func file_lottery_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lottery_proto_rawDesc), len(file_lottery_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
