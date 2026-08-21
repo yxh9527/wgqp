@@ -90,7 +90,8 @@ AvailablePool = E - P - R - Q
 | `CancelBet` 成功          | 冲销 ACTIVE 下注 |         不变 | 冲销对应税收 |             不变 |
 | `PrePay` 成功             |         不变 |             不变 |         不变 | 增加预计赔付 CNY |
 | 超时自动回收              |         不变 |             不变 |         不变 |     减少对应预留 |
-| `Settlement(NORMAL)`      |         不变 | 增加实际赔付 CNY |         不变 |     释放整笔预留 |
+| `Settlement(NORMAL)`（有预留） |     不变 | 增加实际赔付 CNY |         不变 |     释放整笔预留 |
+| `Settlement(NORMAL)`（BETTING 无预留） | 不变 | 增加实际赔付 CNY | 不变 | 不变；正赔付仍校验 AvailablePool，零赔付直接放行 |
 | `Settlement(VOID_REFUND)` | 撤销本局下注 |             不变 | 撤销本局税收 |     释放整笔预留 |
 
 实际赔付小于预留时，结算会释放整笔预留，再把实际赔付累加到 `P`，差额自然回到可用奖池。实际赔付大于预留时拒绝结算。

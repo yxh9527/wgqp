@@ -1463,19 +1463,29 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 	}
 
 	if mode == financeModeNormal {
-		if round.Reservation == nil || round.Reservation.Status != string(financeStateReserved) {
-			resp.Code = services.ErrorCode_PARAMS_INVALID
-			return resp, nil
-		}
-		if req.ReservationId == "" || req.ReservationId != round.Reservation.ReservationID || req.OutcomeHash == "" {
-			resp.Code = services.ErrorCode_PARAMS_INVALID
-			return resp, nil
-		}
-		// 责任上限预留允许最终结算 outcomeHash 与发牌前预留不同，
-		// 实际赔付不超过预留上限即可；精确预留仍要求 outcomeHash 完全一致。
-		if round.Reservation.Mode == reservationModeLiabilityCap {
-			// 校验放到汇总 payout 之后。
-		} else if req.OutcomeHash != round.Reservation.OutcomeHash {
+		hasActiveReservation := round.Reservation != nil &&
+			round.Reservation.Status == string(financeStateReserved)
+		if hasActiveReservation {
+			if req.ReservationId == "" || req.ReservationId != round.Reservation.ReservationID || req.OutcomeHash == "" {
+				resp.Code = services.ErrorCode_PARAMS_INVALID
+				return resp, nil
+			}
+			// 责任上限预留允许最终结算 outcomeHash 与发牌前预留不同，
+			// 实际赔付不超过预留上限即可；精确预留仍要求 outcomeHash 完全一致。
+			if round.Reservation.Mode == reservationModeLiabilityCap {
+				// 校验放到汇总 payout 之后。
+			} else if req.OutcomeHash != round.Reservation.OutcomeHash {
+				resp.Code = services.ErrorCode_PARAMS_INVALID
+				return resp, nil
+			}
+		} else if round.State == string(financeStateBetting) {
+			// 无预留的 NORMAL：仅用于单人房控制/放行兜底。
+			// 正赔付必须在汇总后校验可用奖池，禁止无条件绕过 PrePay。
+			if req.OutcomeHash == "" {
+				resp.Code = services.ErrorCode_PARAMS_INVALID
+				return resp, nil
+			}
+		} else {
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
@@ -1585,15 +1595,24 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		return resp, nil
 	}
 
-	if mode == financeModeNormal && round.Reservation != nil {
-		reserved, parseErr := decimal.NewFromString(round.Reservation.TotalPayoutCNY)
-		if parseErr != nil {
-			resp.Code = services.ErrorCode_SYSTEM_ERROR
-			return resp, nil
-		}
-		if totalPayoutCNY.GreaterThan(reserved) {
-			resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
-			return resp, nil
+	if mode == financeModeNormal {
+		if round.Reservation != nil && round.Reservation.Status == string(financeStateReserved) {
+			reserved, parseErr := decimal.NewFromString(round.Reservation.TotalPayoutCNY)
+			if parseErr != nil {
+				resp.Code = services.ErrorCode_SYSTEM_ERROR
+				return resp, nil
+			}
+			if totalPayoutCNY.GreaterThan(reserved) {
+				resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
+				return resp, nil
+			}
+		} else if round.State == string(financeStateBetting) && totalPayoutCNY.IsPositive() {
+			// 无预留下的正赔付：必须仍通过可用奖池检查，不能绕过 INSUFFICIENT_POOL。
+			available := dao.CacheIns().GetPool(int64(round.Agent), round.PoolSymbol)
+			if totalPayoutCNY.GreaterThan(available) {
+				resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
+				return resp, nil
+			}
 		}
 	}
 
