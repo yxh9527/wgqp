@@ -1726,7 +1726,13 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 
 	round, ok := d.loadRoundLocked(req.RoundId)
 	if !ok {
-		resp.Code = services.ErrorCode_PARAMS_INVALID
+		// 未知 roundId：返回空 BETTING 快照，便于单人房 pre-reveal 在尚无下注时补 Bet。
+		// 不再用 PARAMS_INVALID，避免与“参数错误”混淆。
+		resp.State = string(financeStateBetting)
+		resp.BetDigest = ""
+		resp.BetRevision = 0
+		resp.TotalBetCny = "0"
+		resp.TotalReservedCny = "0"
 		return resp, nil
 	}
 	d.expireRoundIfNeededLocked(round)
