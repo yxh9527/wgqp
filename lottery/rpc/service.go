@@ -973,7 +973,8 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 		State:   string(financeStateBetting),
 		Items:   make([]*services.BetItemResult, 0, len(req.Items)),
 	}
-	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || req.Agent == 0 || len(req.Items) == 0 {
+	// Agent 允许为 0（测试代理）；非法代理由 resolveRuntime 按配置存在性判定。
+	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || len(req.Items) == 0 {
 		resp.Code = services.ErrorCode_PARAMS_INVALID
 		return resp, nil
 	}
@@ -1143,7 +1144,8 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 		State:       string(financeStateBetting),
 		OutcomeHash: req.OutcomeHash,
 	}
-	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || req.Agent == 0 || req.BetDigest == "" || len(req.Items) == 0 {
+	// Agent 允许为 0（测试代理）；非法代理由 resolveRuntime 按配置存在性判定。
+	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || req.BetDigest == "" || len(req.Items) == 0 {
 		resp.Code = services.ErrorCode_PARAMS_INVALID
 		resp.Reason = "INVALID_REQUEST"
 		return resp, nil
@@ -1396,7 +1398,8 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		SettlementId: req.SettlementId,
 		Items:        make([]*services.SettlementItemResult, 0, len(req.Items)),
 	}
-	if req.RoundId == "" || req.GameId == 0 || req.Agent == 0 || req.SettlementId == "" || len(req.Items) == 0 {
+	// Agent 允许为 0（测试代理）；非法代理由 resolveRuntime 按配置存在性判定。
+	if req.RoundId == "" || req.GameId == 0 || req.SettlementId == "" || len(req.Items) == 0 {
 		resp.Code = services.ErrorCode_PARAMS_INVALID
 		return resp, nil
 	}
@@ -1765,7 +1768,8 @@ func (d *LotteryService) CancelBet(_ context.Context, req *services.CancelBetReq
 		RoundId: req.RoundId,
 		State:   string(financeStateBetting),
 	}
-	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || req.Agent == 0 || req.UserId == 0 || req.CurrencyType == "" {
+	// Agent 允许为 0（测试代理）；非法代理由 resolveRuntime 按配置存在性判定。
+	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || req.UserId == 0 || req.CurrencyType == "" {
 		resp.Code = services.ErrorCode_PARAMS_INVALID
 		resp.Reason = "INVALID_REQUEST"
 		return resp, nil
