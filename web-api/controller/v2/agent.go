@@ -66,13 +66,13 @@ func AgentAdd(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, &entity.Response{Code: http.StatusOK, Data: nil, Msg: "操作成功"})
 }
 
-func getAgentDataAggs(startTime, endTime, agentId, webId int64) []*view.AgentInfoAggs {
+func getAgentDataAggs(startTime, endTime int64, hasAgentId bool, agentId, webId int64) []*view.AgentInfoAggs {
 	result := make([]*view.AgentInfoAggs, 0)
 	querys := make([]elastic.Query, 0)
 	if startTime > 0 && endTime > 0 {
 		querys = append(querys, elastic.NewRangeQuery("createAt").Gte(startTime).Lt(endTime))
 	}
-	if agentId >= 0 {
+	if hasAgentId {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
 	}
 	if webId > 0 {
@@ -111,8 +111,9 @@ func AgentInfo(ctx *gin.Context) {
 	webId, _ := strconv.ParseInt(ctx.Query("webId"), 10, 0)
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
-	agentId, _ := strconv.ParseInt(ctx.Query("agentId"), 10, 0)
-	data := getAgentDataAggs(startTime, endTime, agentId, webId)
+	agentId, err := strconv.ParseInt(ctx.Query("agentId"), 10, 0)
+	hasAgentId := err == nil
+	data := getAgentDataAggs(startTime, endTime, hasAgentId, agentId, webId)
 	db := dao.Mysql().Manager.Model(manager.User{}).Debug()
 	td := make([]*view.AgentTotalCount, 0)
 	rd := make([]*view.AgentTotalCount, 0)
@@ -121,7 +122,7 @@ func AgentInfo(ctx *gin.Context) {
 	db.Model(view.AgentTotalCount{}).Debug().Select("count(*) as userNum,agentId").Joins("inner join gp_agent on gp_agent.id = gp_user.agentId").Where("gp_user.webId=? and gp_user.createTime BETWEEN ? and ?", webId, startTime, endTime).Group("agentId").Find(&rd)
 	db = dao.Mysql().Manager.Model(manager.UserScoreLog{})
 	tus := make([]*view.UserScoreSum, 0)
-	if agentId >= 0 {
+	if hasAgentId {
 		db.Model(view.UserScoreSum{}).Debug().Select("sum(score) as scoreSum,agentId,logType").Joins("inner join gp_agent on gp_agent.id = gp_user_score_log.agentId").Where("gp_agent.webId=? and gp_user_score_log.createTime BETWEEN ? and ? and agentId=?", webId, startTime, endTime, agentId).Group("`agentId`,`logType`").Find(&tus)
 	} else {
 		db.Model(view.UserScoreSum{}).Debug().Select("sum(score) as scoreSum,agentId,logType").Joins("inner join gp_agent on gp_agent.id = gp_user_score_log.agentId").Where("gp_agent.webId=? and gp_user_score_log.createTime BETWEEN ? and ?", webId, startTime, endTime).Group("`agentId`,`logType`").Find(&tus)
@@ -326,7 +327,7 @@ func AgentStatInfo(ctx *gin.Context) {
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
 	agentId := ctx.GetInt64("agentId")
-	data := getAgentDataAggs(startTime, endTime, agentId, webId)
+	data := getAgentDataAggs(startTime, endTime, true, agentId, webId)
 	db := dao.Mysql().Manager.Model(manager.User{}).Debug()
 	td := make([]*view.AgentTotalCount, 0)
 	rd := make([]*view.AgentTotalCount, 0)

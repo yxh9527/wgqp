@@ -23,7 +23,8 @@ import (
 // 用户列表
 func GovernList(ctx *gin.Context) {
 	gameIdStr := ctx.Query("gameId")
-	agentId, _ := strconv.Atoi(ctx.Query("agentId"))
+	agentId, err := strconv.Atoi(ctx.Query("agentId"))
+	hasAgentId := err == nil
 	gameIds := make([]int, 0)
 	for _, v := range strings.Split(gameIdStr, ",") {
 		id, _ := strconv.Atoi(v)
@@ -32,7 +33,7 @@ func GovernList(ctx *gin.Context) {
 	games := make([]*manager.Game, 0)
 	dao.Mysql().Manager.Where("number in ?", gameIds).Find(&games)
 	poolDatas := make([]*view.PoolData, 0)
-	if agentId >= 0 {
+	if hasAgentId {
 		for _, game := range games {
 			// /agent/{agentId}/pool/{symbol}
 			key := fmt.Sprintf("/agent/%d/pool/%s", agentId, game.ConfName)
@@ -301,7 +302,8 @@ func UserAndGameDataByHour(ctx *gin.Context) {
 }
 
 func UserAndGameSummary(ctx *gin.Context) {
-	agentId, _ := strconv.Atoi(ctx.Query("agentId"))
+	agentId, err := strconv.Atoi(ctx.Query("agentId"))
+	hasAgentId := err == nil
 	str := ctx.Query("gameId")
 	ids := make([]int, 0)
 
@@ -362,7 +364,7 @@ func UserAndGameSummary(ctx *gin.Context) {
 	preWeekUserData := make([]*manager.PlayerDataSummary, 0)
 	pre2WeekUserData := make([]*manager.PlayerDataSummary, 0)
 
-	if agentId != -1 {
+	if hasAgentId {
 		dao.Mysql().Manager.Model(manager.PlayerDataSummary{}).Debug().Select("regist,all_active,new_active").Where("agent_id=? and record_time >= ? and record_time<?", agentId, preMonthStartTimestamp, preMonthEndTimestamp).Find(&preMonthUserData)
 		dao.Mysql().Manager.Model(manager.PlayerDataSummary{}).Debug().Select("regist,all_active,new_active").Where("agent_id=? and record_time >= ? and record_time<?", agentId, pre2MonthStartTimestamp, pre2MonthEndTimestamp).Find(&pre2MonthUserData)
 		dao.Mysql().Manager.Model(manager.PlayerDataSummary{}).Debug().Select("regist,all_active,new_active").Where("agent_id=? and record_time >= ? and record_time<?", agentId, preWeekStartTimestamp, preWeekEndTimestamp).Find(&preWeekUserData)
@@ -692,11 +694,11 @@ func GetTimeRangeActiveAgent(startTime, endTime, webId int64) []int64 {
 }
 
 // 根据筛选条件加载代理数据
-func LoadAgents(webId, startTime, endTime, page, pageSize, agentId int64, result *entity.ReportForm) {
+func LoadAgents(webId, startTime, endTime, page, pageSize int64, hasAgentId bool, agentId int64, result *entity.ReportForm) {
 	agents := make([]*manager.Agent, 0, 32)
 	ids := make([]interface{}, 0, 32)
 	var total int64 = 0
-	if agentId >= 0 {
+	if hasAgentId {
 		dao.Mysql().Manager.Model(&manager.Agent{}).Where("id = ? and webId=?", agentId, webId).Count(&total)
 		dao.Mysql().Manager.Model(&manager.Agent{}).Where("id = ? and webId=?", agentId, webId).Find(&agents)
 	} else {
@@ -797,7 +799,7 @@ func LoadAgents(webId, startTime, endTime, page, pageSize, agentId int64, result
 }
 
 // 根据筛选条件查询所有统计数据
-func AggsAllWithAgent(startTime, endTime, webId, agentId int64) (map[string]float64, error) {
+func AggsAllWithAgent(startTime, endTime, webId int64, hasAgentId bool, agentId int64) (map[string]float64, error) {
 	result := map[string]float64{
 		"effectiveBetsTotal": 0.0,
 		"profitLossTotal":    0.0,
@@ -812,7 +814,7 @@ func AggsAllWithAgent(startTime, endTime, webId, agentId int64) (map[string]floa
 	if startTime > 0 && endTime > 0 {
 		querys = append(querys, elastic.NewRangeQuery("createAt").Gte(startTime).Lte(endTime))
 	}
-	if agentId >= 0 {
+	if hasAgentId {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
 	}
 	if webId > 0 {
@@ -872,10 +874,11 @@ func ReportFormListWithAgent(ctx *gin.Context) {
 	page, _ := strconv.ParseInt(ctx.Query("page"), 10, 64)
 	pageSize, _ := strconv.ParseInt(ctx.Query("pageSize"), 10, 64)
 	webId, _ := strconv.ParseInt(ctx.Query("webId"), 10, 64)
-	agentId, _ := strconv.ParseInt(ctx.Query("agentId"), 10, 64)
+	agentId, ae := strconv.ParseInt(ctx.Query("agentId"), 10, 64)
+	hasAgentId := ae == nil
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
-	res, err := AggsAllWithAgent(startTime, endTime, webId, agentId)
+	res, err := AggsAllWithAgent(startTime, endTime, webId, hasAgentId, agentId)
 	if err != nil {
 		ctx.JSON(http.StatusOK, &entity.Response{Code: http.StatusInternalServerError, Msg: "失败"})
 		return
@@ -890,7 +893,7 @@ func ReportFormListWithAgent(ctx *gin.Context) {
 		ChipsTotal:         res["chipsTotal"],
 		DocCount:           int64(res["docCount"]),
 	}
-	LoadAgents(webId, startTime, endTime, page, pageSize, agentId, result)
+	LoadAgents(webId, startTime, endTime, page, pageSize, hasAgentId, agentId, result)
 	ctx.JSON(http.StatusOK, &entity.Response{Code: http.StatusOK, Msg: "成功", Data: result})
 }
 
