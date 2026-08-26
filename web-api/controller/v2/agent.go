@@ -111,10 +111,7 @@ func AgentInfo(ctx *gin.Context) {
 	webId, _ := strconv.ParseInt(ctx.Query("webId"), 10, 0)
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
-	agentId, err := strconv.ParseInt(ctx.Query("agentId"), 10, 0)
-	if err != nil {
-		agentId = -1
-	}
+	agentId, _ := strconv.ParseInt(ctx.Query("agentId"), 10, 0)
 	data := getAgentDataAggs(startTime, endTime, agentId, webId)
 	db := dao.Mysql().Manager.Model(manager.User{}).Debug()
 	td := make([]*view.AgentTotalCount, 0)

@@ -23,10 +23,7 @@ import (
 // 用户列表
 func GovernList(ctx *gin.Context) {
 	gameIdStr := ctx.Query("gameId")
-	agentId, err := strconv.Atoi(ctx.Query("agentId"))
-	if err != nil {
-		agentId = -1
-	}
+	agentId, _ := strconv.Atoi(ctx.Query("agentId"))
 	gameIds := make([]int, 0)
 	for _, v := range strings.Split(gameIdStr, ",") {
 		id, _ := strconv.Atoi(v)
@@ -304,13 +301,9 @@ func UserAndGameDataByHour(ctx *gin.Context) {
 }
 
 func UserAndGameSummary(ctx *gin.Context) {
-	agentId, err := strconv.Atoi(ctx.Query("agentId"))
+	agentId, _ := strconv.Atoi(ctx.Query("agentId"))
 	str := ctx.Query("gameId")
 	ids := make([]int, 0)
-
-	if err != nil {
-		agentId = -1
-	}
 
 	if str != "" {
 		for _, v := range strings.Split(str, ",") {
@@ -879,10 +872,7 @@ func ReportFormListWithAgent(ctx *gin.Context) {
 	page, _ := strconv.ParseInt(ctx.Query("page"), 10, 64)
 	pageSize, _ := strconv.ParseInt(ctx.Query("pageSize"), 10, 64)
 	webId, _ := strconv.ParseInt(ctx.Query("webId"), 10, 64)
-	agentId, ae := strconv.ParseInt(ctx.Query("agentId"), 10, 64)
-	if ae != nil {
-		agentId = -1
-	}
+	agentId, _ := strconv.ParseInt(ctx.Query("agentId"), 10, 64)
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
 	res, err := AggsAllWithAgent(startTime, endTime, webId, agentId)
