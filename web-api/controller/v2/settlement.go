@@ -45,7 +45,7 @@ func SettlementList(ctx *gin.Context) {
 	if errUserId == nil {
 		querys = append(querys, elastic.NewTermQuery("userId", userId))
 	}
-	if errAgentId == nil && agentId > 0 {
+	if errAgentId == nil && agentId >= 0 {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
 	}
 	if errStart == nil && errEnd == nil {
@@ -173,7 +173,7 @@ func ExportSettlmentCountWithAgentId(ctx *gin.Context) {
 	if errUserId == nil {
 		querys = append(querys, elastic.NewTermQuery("userId", userId))
 	}
-	if errAgentId == nil && agentId > 0 {
+	if errAgentId == nil && agentId >= 0 {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
 	}
 	if errStart == nil && errEnd == nil {
@@ -241,7 +241,7 @@ func ExportSettlementsWithAgentId(ctx *gin.Context) {
 	if errUserId == nil {
 		querys = append(querys, elastic.NewTermQuery("userId", userId))
 	}
-	if errAgentId == nil && agentId > 0 {
+	if errAgentId == nil && agentId >= 0 {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
 	}
 	if errStart == nil && errEnd == nil {

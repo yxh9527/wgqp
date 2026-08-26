@@ -124,7 +124,7 @@ func AgentInfo(ctx *gin.Context) {
 	db.Model(view.AgentTotalCount{}).Debug().Select("count(*) as userNum,agentId").Joins("inner join gp_agent on gp_agent.id = gp_user.agentId").Where("gp_user.webId=? and gp_user.createTime BETWEEN ? and ?", webId, startTime, endTime).Group("agentId").Find(&rd)
 	db = dao.Mysql().Manager.Model(manager.UserScoreLog{})
 	tus := make([]*view.UserScoreSum, 0)
-	if agentId > 0 {
+	if agentId >= 0 {
 		db.Model(view.UserScoreSum{}).Debug().Select("sum(score) as scoreSum,agentId,logType").Joins("inner join gp_agent on gp_agent.id = gp_user_score_log.agentId").Where("gp_agent.webId=? and gp_user_score_log.createTime BETWEEN ? and ? and agentId=?", webId, startTime, endTime, agentId).Group("`agentId`,`logType`").Find(&tus)
 	} else {
 		db.Model(view.UserScoreSum{}).Debug().Select("sum(score) as scoreSum,agentId,logType").Joins("inner join gp_agent on gp_agent.id = gp_user_score_log.agentId").Where("gp_agent.webId=? and gp_user_score_log.createTime BETWEEN ? and ?", webId, startTime, endTime).Group("`agentId`,`logType`").Find(&tus)
@@ -338,7 +338,7 @@ func AgentStatInfo(ctx *gin.Context) {
 	db.Model(view.AgentTotalCount{}).Debug().Select("count(*) as userNum,agentId").Joins("inner join gp_agent on gp_agent.id = gp_user.agentId").Where("gp_user.webId=? and gp_user.createTime BETWEEN ? and ?", webId, startTime, endTime).Group("agentId").Find(&rd)
 	db = dao.Mysql().Manager.Model(manager.UserScoreLog{})
 	tus := make([]*view.UserScoreSum, 0)
-	if agentId > 0 {
+	if agentId >= 0 {
 		db.Model(view.UserScoreSum{}).Debug().Select("sum(score) as scoreSum,agentId,logType").Joins("inner join gp_agent on gp_agent.id = gp_user_score_log.agentId").Where("gp_agent.webId=? and gp_user_score_log.createTime BETWEEN ? and ? and agentId=?", webId, startTime, endTime, agentId).Group("`agentId`,`logType`").Find(&tus)
 	} else {
 		db.Model(view.UserScoreSum{}).Debug().Select("sum(score) as scoreSum,agentId,logType").Joins("inner join gp_agent on gp_agent.id = gp_user_score_log.agentId").Where("gp_agent.webId=? and gp_user_score_log.createTime BETWEEN ? and ?", webId, startTime, endTime).Group("`agentId`,`logType`").Find(&tus)
