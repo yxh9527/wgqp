@@ -106,6 +106,8 @@ func (t *UserGameDataByHourActive) TableName() string {
 type DataAnalysisItem struct {
 	WebId              int     `json:"webId"`
 	AgentId            int     `json:"agentId"`
+	Level              int     `json:"level"`
+	LevelName          string  `json:"levelName"`
 	GameId             int64   `json:"gameId"`
 	Symbol             string  `json:"symbol"`
 	DocCount           int     `json:"doc_count"`

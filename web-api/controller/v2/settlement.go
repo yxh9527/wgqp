@@ -26,6 +26,7 @@ func SettlementList(ctx *gin.Context) {
 	nickName := ctx.Query("nickName")
 	hash := ctx.Query("hash")
 	strNce := ctx.Query("complete")
+	level, errLevel := strconv.ParseInt(ctx.Query("level"), 10, 0)
 	page, _ := strconv.Atoi(ctx.Query("page"))
 	pageSize, _ := strconv.Atoi(ctx.Query("pageSize"))
 	if pageSize <= 0 {
@@ -47,6 +48,9 @@ func SettlementList(ctx *gin.Context) {
 	}
 	if errAgentId == nil && agentId >= 0 {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
+	}
+	if errLevel == nil && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	if errStart == nil && errEnd == nil {
 		querys = append(querys, elastic.NewRangeQuery("playedDate").Gte(startTime*1000).Lt(endTime*1000))
@@ -107,6 +111,7 @@ func SettlementListWithAgentId(ctx *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 	querys := make([]elastic.Query, 0)
+	level, errLevel := strconv.ParseInt(ctx.Query("level"), 10, 0)
 	if gameId != "" {
 		ids := strings.Split(gameId, ",")
 		gameIds := make([]interface{}, 0)
@@ -124,6 +129,9 @@ func SettlementListWithAgentId(ctx *gin.Context) {
 	}
 	if errStart == nil && errEnd == nil {
 		querys = append(querys, elastic.NewRangeQuery("playedDate").Gte(startTime).Lt(endTime))
+	}
+	if errLevel == nil && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	if officeNumber != "" {
 		querys = append(querys, elastic.NewMatchPhraseQuery("roundID", officeNumber))
@@ -160,6 +168,7 @@ func ExportSettlmentCountWithAgentId(ctx *gin.Context) {
 	nickName := ctx.Query("nickName")
 	hash := ctx.Query("hash")
 	strNce := ctx.Query("complete")
+	level, errLevel := strconv.ParseInt(ctx.Query("level"), 10, 0)
 	querys := make([]elastic.Query, 0)
 	if gameId != "" {
 		ids := strings.Split(gameId, ",")
@@ -175,6 +184,9 @@ func ExportSettlmentCountWithAgentId(ctx *gin.Context) {
 	}
 	if errAgentId == nil && agentId >= 0 {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
+	}
+	if errLevel == nil && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	if errStart == nil && errEnd == nil {
 		querys = append(querys, elastic.NewRangeQuery("playedDate").Gte(startTime*1000).Lt(endTime*1000))
@@ -228,6 +240,7 @@ func ExportSettlementsWithAgentId(ctx *gin.Context) {
 	nickName := ctx.Query("nickName")
 	hash := ctx.Query("hash")
 	strNce := ctx.Query("complete")
+	level, errLevel := strconv.ParseInt(ctx.Query("level"), 10, 0)
 	querys := make([]elastic.Query, 0)
 	if gameId != "" {
 		ids := strings.Split(gameId, ",")
@@ -243,6 +256,9 @@ func ExportSettlementsWithAgentId(ctx *gin.Context) {
 	}
 	if errAgentId == nil && agentId >= 0 {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
+	}
+	if errLevel == nil && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	if errStart == nil && errEnd == nil {
 		querys = append(querys, elastic.NewRangeQuery("playedDate").Gte(startTime*1000).Lt(endTime*1000))

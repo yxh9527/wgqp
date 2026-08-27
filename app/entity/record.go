@@ -12,6 +12,8 @@ type CacheRecordsReq struct {
 	WebId          uint32  `json:"webId"`
 	UserId         uint32  `json:"userId"`
 	AgentId        uint32  `json:"agentId"`
+	Level          uint32  `json:"level"`
+	LevelName      string  `json:"levelName"`
 	GameId         uint32  `json:"gameId"`
 	Account        string  `json:"account"`
 	NickName       string  `json:"nickName"`
@@ -66,6 +68,8 @@ type UserRecordInfo struct {
 type ClientRecordsReq struct {
 	UserId         uint32 `json:"userId"`
 	AgentId        uint32 `json:"agentId"`
+	Level          uint32 `json:"level"`
+	LevelName      string `json:"levelName"`
 	GameId         uint32 `json:"gameId"`
 	Account        string `json:"account"`
 	NickName       string `json:"nickName"`

@@ -3,6 +3,8 @@ package view
 type Settlement struct {
 	AgentId         int64   `json:"agentId"`
 	UserId          int64   `json:"userId"`
+	Level           int64   `json:"level"`
+	LevelName       string  `json:"levelName"`
 	GameId          int64   `json:"gameId"`
 	Account         string  `json:"account"`
 	NickName        string  `json:"nickName"`

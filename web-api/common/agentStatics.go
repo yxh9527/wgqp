@@ -18,6 +18,7 @@ func getSettlementStat(start, end time.Time) map[string]*view.DataAnalysisItem {
 	//统计
 	webIdAggs := elastic.NewTermsAggregation().Field("webId")
 	aggs := elastic.NewTermsAggregation().Field("agentId").Size(10000)
+	levelAggs := elastic.NewTermsAggregation().Field("level").Size(32)
 	gameAggs := elastic.NewTermsAggregation().Field("gameId").Size(3000)
 	gameAggs.SubAggregation("effectiveBetsTotal", elastic.NewSumAggregation().Field("exBet"))
 	gameAggs.SubAggregation("profitLossTotal", elastic.NewSumAggregation().Field("exWin"))
@@ -25,7 +26,8 @@ func getSettlementStat(start, end time.Time) map[string]*view.DataAnalysisItem {
 	gameAggs.SubAggregation("revenueTotal", elastic.NewSumAggregation().Field("exRevenue"))
 	gameAggs.SubAggregation("pumpTotal", elastic.NewSumAggregation().Field("pump"))
 	gameAggs.SubAggregation("chipsTotal", elastic.NewSumAggregation().Field("chips"))
-	aggs.SubAggregation("gameId", gameAggs)
+	levelAggs.SubAggregation("gameId", gameAggs)
+	aggs.SubAggregation("level", levelAggs)
 	webIdAggs.SubAggregation("agentId", aggs)
 	query1 := elastic.NewRangeQuery("playedDate").Gte(start.UnixMilli()).Lt(end.UnixMilli())
 	query2 := elastic.NewRangeQuery("isTourist").Lte(0)
@@ -44,41 +46,54 @@ func getSettlementStat(start, end time.Time) map[string]*view.DataAnalysisItem {
 			if ok {
 				for _, item := range items.Buckets {
 					agentId := item.Key.(float64)
-					itemGames, ook := item.Aggregations.Terms("gameId")
+					itemLevels, ook := item.Aggregations.Terms("level")
 					if !ook {
 						continue
 					}
-					for _, id := range itemGames.Buckets {
-						gameId := id.Key.(float64)
-						effectivebets, _ := id.Sum("effectiveBetsTotal")
-						profitLoss, _ := id.Sum("profitLossTotal")
-						chips, _ := id.Sum("chipsTotal")
-						pump, _ := id.Sum("pumpTotal")
-						userCount, _ := id.Cardinality("userTotal")
-						revenue, _ := id.Sum("revenueTotal")
-						cfg := config.CfgIns.GetPoolCfgByGameId(int64(agentId), int64(gameId))
-						tmp := &view.DataAnalysisItem{
-							WebId:              int(webId),
-							AgentId:            int(agentId),
-							GameId:             int64(gameId),
-							DocCount:           int(id.DocCount),
-							ChipsTotal:         *chips.Value,
-							ProfitLossTotal:    *profitLoss.Value,
-							EffectiveBetsTotal: *effectivebets.Value,
-							PumpTotal:          *pump.Value,
-							UserTotal:          int(*userCount.Value),
-							RevenueTotal:       *revenue.Value,
-							GameName:           "",
+					for _, levelItem := range itemLevels.Buckets {
+						level := levelItem.Key.(float64)
+						itemGames, ook := levelItem.Aggregations.Terms("gameId")
+						if !ook {
+							continue
 						}
-						if cfg != nil {
-							if len(cfg.NameZH) > 0 {
-								tmp.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
-							} else {
-								tmp.GameName = cfg.Name
+						for _, id := range itemGames.Buckets {
+							gameId := id.Key.(float64)
+							effectivebets, _ := id.Sum("effectiveBetsTotal")
+							profitLoss, _ := id.Sum("profitLossTotal")
+							chips, _ := id.Sum("chipsTotal")
+							pump, _ := id.Sum("pumpTotal")
+							userCount, _ := id.Cardinality("userTotal")
+							revenue, _ := id.Sum("revenueTotal")
+							cfg := config.CfgIns.GetPoolCfgByGameId(int64(agentId), int64(gameId))
+							levelName := ""
+							if cfg != nil {
+								levelName = config.RoomLevelName(cfg.Symbol, uint32(level))
 							}
-							tmp.Symbol = cfg.Symbol
+							tmp := &view.DataAnalysisItem{
+								WebId:              int(webId),
+								AgentId:            int(agentId),
+								Level:              int(level),
+								LevelName:          levelName,
+								GameId:             int64(gameId),
+								DocCount:           int(id.DocCount),
+								ChipsTotal:         *chips.Value,
+								ProfitLossTotal:    *profitLoss.Value,
+								EffectiveBetsTotal: *effectivebets.Value,
+								PumpTotal:          *pump.Value,
+								UserTotal:          int(*userCount.Value),
+								RevenueTotal:       *revenue.Value,
+								GameName:           "",
+							}
+							if cfg != nil {
+								if len(cfg.NameZH) > 0 {
+									tmp.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
+								} else {
+									tmp.GameName = cfg.Name
+								}
+								tmp.Symbol = cfg.Symbol
+							}
+							result[fmt.Sprintf("%d-%d-%d", int(agentId), int(level), int(gameId))] = tmp
 						}
-						result[fmt.Sprintf("%d-%d", int(agentId), int(gameId))] = tmp
 					}
 				}
 			}
@@ -113,6 +128,7 @@ func getSettlementRangeData(start, end time.Time) map[string]*view.DataAnalysisI
 	//统计
 	webIdAggs := elastic.NewTermsAggregation().Field("webId")
 	aggs := elastic.NewTermsAggregation().Field("agentId").Size(10000)
+	levelAggs := elastic.NewTermsAggregation().Field("level").Size(32)
 	gameAggs := elastic.NewTermsAggregation().Field("gameId").Size(3000)
 	gameAggs.SubAggregation("effectiveBetsTotal", elastic.NewSumAggregation().Field("effectiveBetsTotal"))
 	gameAggs.SubAggregation("profitLossTotal", elastic.NewSumAggregation().Field("profitLossTotal"))
@@ -121,7 +137,8 @@ func getSettlementRangeData(start, end time.Time) map[string]*view.DataAnalysisI
 	gameAggs.SubAggregation("pumpTotal", elastic.NewSumAggregation().Field("pumpTotal"))
 	gameAggs.SubAggregation("chipsTotal", elastic.NewSumAggregation().Field("chipsTotal"))
 	gameAggs.SubAggregation("countTotal", elastic.NewSumAggregation().Field("doc_count"))
-	aggs.SubAggregation("gameId", gameAggs)
+	levelAggs.SubAggregation("gameId", gameAggs)
+	aggs.SubAggregation("level", levelAggs)
 	webIdAggs.SubAggregation("agentId", aggs)
 	boolQuery := elastic.NewBoolQuery().Must(elastic.NewRangeQuery("startTime").Gte(start.Unix()), elastic.NewRangeQuery("endTime").Lte(end.Unix()))
 	resp, err := dao.Es().Search().Index("pp_data_analysis_range").Query(boolQuery).Aggregation("webId", webIdAggs).Size(0).Do(context.Background())
@@ -138,42 +155,55 @@ func getSettlementRangeData(start, end time.Time) map[string]*view.DataAnalysisI
 			if ok {
 				for _, item := range items.Buckets {
 					agentId := item.Key.(float64)
-					itemGames, ook := item.Aggregations.Terms("gameId")
+					itemLevels, ook := item.Aggregations.Terms("level")
 					if !ook {
 						continue
 					}
-					for _, id := range itemGames.Buckets {
-						gameId := id.Key.(float64)
-						effectivebets, _ := id.Sum("effectiveBetsTotal")
-						profitLoss, _ := id.Sum("profitLossTotal")
-						chips, _ := id.Sum("chipsTotal")
-						pump, _ := id.Sum("pumpTotal")
-						userCount, _ := id.Cardinality("userTotal")
-						revenue, _ := id.Sum("revenueTotal")
-						docCount, _ := id.Sum("countTotal")
-						cfg := config.CfgIns.GetPoolCfgByGameId(int64(agentId), int64(gameId))
-						tmp := &view.DataAnalysisItem{
-							WebId:              int(webId),
-							AgentId:            int(agentId),
-							GameId:             int64(gameId),
-							DocCount:           int(*docCount.Value),
-							ChipsTotal:         *chips.Value,
-							ProfitLossTotal:    *profitLoss.Value,
-							EffectiveBetsTotal: *effectivebets.Value,
-							PumpTotal:          *pump.Value,
-							UserTotal:          int(*userCount.Value),
-							RevenueTotal:       *revenue.Value,
-							GameName:           "",
+					for _, levelItem := range itemLevels.Buckets {
+						level := levelItem.Key.(float64)
+						itemGames, ook := levelItem.Aggregations.Terms("gameId")
+						if !ook {
+							continue
 						}
-						if cfg != nil {
-							if len(cfg.NameZH) > 0 {
-								tmp.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
-							} else {
-								tmp.GameName = cfg.Name
+						for _, id := range itemGames.Buckets {
+							gameId := id.Key.(float64)
+							effectivebets, _ := id.Sum("effectiveBetsTotal")
+							profitLoss, _ := id.Sum("profitLossTotal")
+							chips, _ := id.Sum("chipsTotal")
+							pump, _ := id.Sum("pumpTotal")
+							userCount, _ := id.Cardinality("userTotal")
+							revenue, _ := id.Sum("revenueTotal")
+							docCount, _ := id.Sum("countTotal")
+							cfg := config.CfgIns.GetPoolCfgByGameId(int64(agentId), int64(gameId))
+							levelName := ""
+							if cfg != nil {
+								levelName = config.RoomLevelName(cfg.Symbol, uint32(level))
 							}
-							tmp.Symbol = cfg.Symbol
+							tmp := &view.DataAnalysisItem{
+								WebId:              int(webId),
+								AgentId:            int(agentId),
+								Level:              int(level),
+								LevelName:          levelName,
+								GameId:             int64(gameId),
+								DocCount:           int(*docCount.Value),
+								ChipsTotal:         *chips.Value,
+								ProfitLossTotal:    *profitLoss.Value,
+								EffectiveBetsTotal: *effectivebets.Value,
+								PumpTotal:          *pump.Value,
+								UserTotal:          int(*userCount.Value),
+								RevenueTotal:       *revenue.Value,
+								GameName:           "",
+							}
+							if cfg != nil {
+								if len(cfg.NameZH) > 0 {
+									tmp.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
+								} else {
+									tmp.GameName = cfg.Name
+								}
+								tmp.Symbol = cfg.Symbol
+							}
+							result[fmt.Sprintf("%d-%d-%d", int(agentId), int(level), int(gameId))] = tmp
 						}
-						result[fmt.Sprintf("%d-%d", int(agentId), int(gameId))] = tmp
 					}
 				}
 			}
@@ -201,7 +231,7 @@ func DataAnalysisSave(data map[string]*view.DataAnalysisItem) {
 	bulkService := dao.Es().Bulk()
 	records := make([]elastic.BulkableRequest, 0)
 	for _, item := range data {
-		records = append(records, elastic.NewBulkIndexRequest().Index("pp_data_analysis").Id(fmt.Sprintf("%x", md5.Sum([]byte(item.Date+fmt.Sprintf("%d", item.AgentId)+item.Symbol)))).Doc(item))
+		records = append(records, elastic.NewBulkIndexRequest().Index("pp_data_analysis").Id(fmt.Sprintf("%x", md5.Sum([]byte(item.Date+fmt.Sprintf("%d", item.AgentId)+fmt.Sprintf("%d", item.Level)+item.Symbol)))).Doc(item))
 	}
 	bulkService.Add(records...)
 	_, err := bulkService.Do(context.Background())

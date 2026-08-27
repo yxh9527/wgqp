@@ -467,9 +467,11 @@ func UserAndGameSummaryDetail(ctx *gin.Context) {
 func ExportAgentData(ctx *gin.Context) {
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
-	//统计
+	levelText := ctx.Query("level")
+	level, levelErr := strconv.ParseInt(levelText, 10, 64)
 	webIdAggs := elastic.NewTermsAggregation().Field("webId")
 	aggs := elastic.NewTermsAggregation().Field("agentId").Size(10000)
+	levelAggs := elastic.NewTermsAggregation().Field("level").Size(32)
 	gameAggs := elastic.NewTermsAggregation().Field("gameId").Size(3000)
 	gameAggs.SubAggregation("effectiveBetsTotal", elastic.NewSumAggregation().Field("exBet"))
 	gameAggs.SubAggregation("profitLossTotal", elastic.NewSumAggregation().Field("exWin"))
@@ -477,12 +479,16 @@ func ExportAgentData(ctx *gin.Context) {
 	gameAggs.SubAggregation("revenueTotal", elastic.NewSumAggregation().Field("exRevenue"))
 	gameAggs.SubAggregation("pumpTotal", elastic.NewSumAggregation().Field("pump"))
 	gameAggs.SubAggregation("chipsTotal", elastic.NewSumAggregation().Field("chips"))
-	aggs.SubAggregation("gameId", gameAggs)
+	levelAggs.SubAggregation("gameId", gameAggs)
+	aggs.SubAggregation("level", levelAggs)
 	webIdAggs.SubAggregation("agentId", aggs)
 	zap.L().Debug("====>", zap.Any("startTime", startTime), zap.Any("endTime", endTime))
 	query1 := elastic.NewRangeQuery("playedDate").Gte(startTime * 1000).Lt(endTime * 1000)
 	query2 := elastic.NewRangeQuery("isTourist").Lte(0)
 	boolQuery := elastic.NewBoolQuery().Must(query1, query2)
+	if levelErr == nil && levelText != "" && level >= 0 {
+		boolQuery = boolQuery.Must(elastic.NewTermQuery("level", level))
+	}
 	resp, err := dao.Es().Search().Index("pp_gp_settlement").Query(boolQuery).Aggregation("webId", webIdAggs).Size(0).Do(context.Background())
 	if err != nil {
 		zap.L().Error("获取注单打点数据异常", zap.Any("err", err))
@@ -498,41 +504,54 @@ func ExportAgentData(ctx *gin.Context) {
 			if ok {
 				for _, item := range items.Buckets {
 					agentId := item.Key.(float64)
-					itemGames, ook := item.Aggregations.Terms("gameId")
+					itemLevels, ook := item.Aggregations.Terms("level")
 					if !ook {
 						continue
 					}
-					for _, id := range itemGames.Buckets {
-						gameId := id.Key.(float64)
-						effectivebets, _ := id.Sum("effectiveBetsTotal")
-						profitLoss, _ := id.Sum("profitLossTotal")
-						chips, _ := id.Sum("chipsTotal")
-						pump, _ := id.Sum("pumpTotal")
-						userCount, _ := id.Cardinality("userTotal")
-						revenue, _ := id.Sum("revenueTotal")
-						cfg := config.CfgIns.GetPoolCfgByGameId(int64(agentId), int64(gameId))
-						tmp := &view.DataAnalysisItem{
-							WebId:              int(webId),
-							AgentId:            int(agentId),
-							GameId:             int64(gameId),
-							DocCount:           int(id.DocCount),
-							ChipsTotal:         *chips.Value,
-							ProfitLossTotal:    *profitLoss.Value,
-							EffectiveBetsTotal: *effectivebets.Value,
-							PumpTotal:          *pump.Value,
-							UserTotal:          int(*userCount.Value),
-							RevenueTotal:       *revenue.Value,
-							GameName:           "",
+					for _, levelItem := range itemLevels.Buckets {
+						levelKey := levelItem.Key.(float64)
+						itemGames, ook := levelItem.Aggregations.Terms("gameId")
+						if !ook {
+							continue
 						}
-						if cfg != nil {
-							if len(cfg.NameZH) > 0 {
-								tmp.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
-							} else {
-								tmp.GameName = cfg.Name
+						for _, id := range itemGames.Buckets {
+							gameId := id.Key.(float64)
+							effectivebets, _ := id.Sum("effectiveBetsTotal")
+							profitLoss, _ := id.Sum("profitLossTotal")
+							chips, _ := id.Sum("chipsTotal")
+							pump, _ := id.Sum("pumpTotal")
+							userCount, _ := id.Cardinality("userTotal")
+							revenue, _ := id.Sum("revenueTotal")
+							cfg := config.CfgIns.GetPoolCfgByGameId(int64(agentId), int64(gameId))
+							levelName := ""
+							if cfg != nil {
+								levelName = config.RoomLevelName(cfg.Symbol, uint32(levelKey))
 							}
-							tmp.Symbol = cfg.Symbol
+							tmp := &view.DataAnalysisItem{
+								WebId:              int(webId),
+								AgentId:            int(agentId),
+								Level:              int(levelKey),
+								LevelName:          levelName,
+								GameId:             int64(gameId),
+								DocCount:           int(id.DocCount),
+								ChipsTotal:         *chips.Value,
+								ProfitLossTotal:    *profitLoss.Value,
+								EffectiveBetsTotal: *effectivebets.Value,
+								PumpTotal:          *pump.Value,
+								UserTotal:          int(*userCount.Value),
+								RevenueTotal:       *revenue.Value,
+								GameName:           "",
+							}
+							if cfg != nil {
+								if len(cfg.NameZH) > 0 {
+									tmp.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
+								} else {
+									tmp.GameName = cfg.Name
+								}
+								tmp.Symbol = cfg.Symbol
+							}
+							result[fmt.Sprintf("%d-%d-%d", int(agentId), int(levelKey), int(gameId))] = tmp
 						}
-						result[fmt.Sprintf("%d-%s", int(agentId), tmp.Symbol)] = tmp
 					}
 				}
 			}
@@ -545,6 +564,7 @@ func ReportFormList(ctx *gin.Context) {
 	webId, _ := strconv.Atoi(ctx.Query("webId"))
 	agentId, agentIdError := strconv.Atoi(ctx.Query("agentId"))
 	str := ctx.Query("gameId")
+	level, errLevel := strconv.Atoi(ctx.Query("level"))
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
 	ids := make([]interface{}, 0)
@@ -563,6 +583,9 @@ func ReportFormList(ctx *gin.Context) {
 	}
 	if webId > 0 {
 		querys = append(querys, elastic.NewTermQuery("webId", webId))
+	}
+	if errLevel == nil && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	if len(ids) > 0 {
 		querys = append(querys, elastic.NewTermsQuery("gameId", ids...))
@@ -663,13 +686,16 @@ func ReportFormList(ctx *gin.Context) {
 }
 
 // 获取时间段范围内活跃的代理
-func GetTimeRangeActiveAgent(startTime, endTime, webId int64) []int64 {
+func GetTimeRangeActiveAgent(startTime, endTime, webId, level int64, hasLevel bool) []int64 {
 	querys := make([]elastic.Query, 0)
 	if startTime > 0 && endTime > 0 {
 		querys = append(querys, elastic.NewRangeQuery("createAt").Gte(startTime).Lte(endTime))
 	}
 	if webId > 0 {
 		querys = append(querys, elastic.NewTermQuery("webId", webId))
+	}
+	if hasLevel {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	boolQuery := elastic.NewBoolQuery().Must(querys...)
 	resp, err := dao.Es().Search().Index("pp_data_analysis").
@@ -694,7 +720,7 @@ func GetTimeRangeActiveAgent(startTime, endTime, webId int64) []int64 {
 }
 
 // 根据筛选条件加载代理数据
-func LoadAgents(webId, startTime, endTime, page, pageSize int64, hasAgentId bool, agentId int64, result *entity.ReportForm) {
+func LoadAgents(webId, startTime, endTime, page, pageSize int64, hasAgentId bool, agentId, level int64, hasLevel bool, result *entity.ReportForm) {
 	agents := make([]*manager.Agent, 0, 32)
 	ids := make([]interface{}, 0, 32)
 	var total int64 = 0
@@ -702,7 +728,7 @@ func LoadAgents(webId, startTime, endTime, page, pageSize int64, hasAgentId bool
 		dao.Mysql().Manager.Model(&manager.Agent{}).Where("id = ? and webId=?", agentId, webId).Count(&total)
 		dao.Mysql().Manager.Model(&manager.Agent{}).Where("id = ? and webId=?", agentId, webId).Find(&agents)
 	} else {
-		agentIds := GetTimeRangeActiveAgent(startTime, endTime, webId)
+		agentIds := GetTimeRangeActiveAgent(startTime, endTime, webId, level, hasLevel)
 		total = int64(len(agentIds))
 		start := (page - 1) * pageSize
 		end := start + pageSize
@@ -727,6 +753,9 @@ func LoadAgents(webId, startTime, endTime, page, pageSize int64, hasAgentId bool
 	}
 	if webId > 0 {
 		querys = append(querys, elastic.NewTermQuery("webId", webId))
+	}
+	if hasLevel {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	boolQuery := elastic.NewBoolQuery().Must(querys...)
 	aggs := elastic.NewTermsAggregation().Field("agentId").Size(10000)
@@ -799,7 +828,7 @@ func LoadAgents(webId, startTime, endTime, page, pageSize int64, hasAgentId bool
 }
 
 // 根据筛选条件查询所有统计数据
-func AggsAllWithAgent(startTime, endTime, webId int64, hasAgentId bool, agentId int64) (map[string]float64, error) {
+func AggsAllWithAgent(startTime, endTime, webId int64, hasAgentId bool, agentId, level int64, hasLevel bool) (map[string]float64, error) {
 	result := map[string]float64{
 		"effectiveBetsTotal": 0.0,
 		"profitLossTotal":    0.0,
@@ -819,6 +848,9 @@ func AggsAllWithAgent(startTime, endTime, webId int64, hasAgentId bool, agentId 
 	}
 	if webId > 0 {
 		querys = append(querys, elastic.NewTermQuery("webId", webId))
+	}
+	if hasLevel {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	boolQuery := elastic.NewBoolQuery().Must(querys...)
 	resp, err := dao.Es().Search().Index("pp_data_analysis").
@@ -878,7 +910,10 @@ func ReportFormListWithAgent(ctx *gin.Context) {
 	hasAgentId := ae == nil
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
-	res, err := AggsAllWithAgent(startTime, endTime, webId, hasAgentId, agentId)
+	levelText := ctx.Query("level")
+	level, levelErr := strconv.ParseInt(levelText, 10, 64)
+	hasLevel := levelErr == nil && levelText != "" && level >= 0
+	res, err := AggsAllWithAgent(startTime, endTime, webId, hasAgentId, agentId, level, hasLevel)
 	if err != nil {
 		ctx.JSON(http.StatusOK, &entity.Response{Code: http.StatusInternalServerError, Msg: "失败"})
 		return
@@ -893,7 +928,7 @@ func ReportFormListWithAgent(ctx *gin.Context) {
 		ChipsTotal:         res["chipsTotal"],
 		DocCount:           int64(res["docCount"]),
 	}
-	LoadAgents(webId, startTime, endTime, page, pageSize, hasAgentId, agentId, result)
+	LoadAgents(webId, startTime, endTime, page, pageSize, hasAgentId, agentId, level, hasLevel, result)
 	ctx.JSON(http.StatusOK, &entity.Response{Code: http.StatusOK, Msg: "成功", Data: result})
 }
 
@@ -902,12 +937,17 @@ func GetAgentGameDataAggs(ctx *gin.Context) {
 	agentId, ae := strconv.ParseInt(ctx.Query("agentId"), 10, 64)
 	startTime, se := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, ee := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
+	levelText := ctx.Query("level")
+	level, levelErr := strconv.ParseInt(levelText, 10, 64)
 	querys := make([]elastic.Query, 0)
 	if se == nil && ee == nil {
 		querys = append(querys, elastic.NewRangeQuery("createAt").Gte(startTime).Lt(endTime))
 	}
 	if ae == nil {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
+	}
+	if levelErr == nil && levelText != "" && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	boolQuery := elastic.NewBoolQuery().Must(querys...)
 	aggs := elastic.NewTermsAggregation().Field("gameId").Size(10000)
@@ -993,6 +1033,8 @@ func GetAgentGameDataAggs(ctx *gin.Context) {
 func AgentReportFormList(ctx *gin.Context) {
 	agentId := ctx.GetInt64("agentId")
 	str := ctx.Query("gameId")
+	levelText := ctx.Query("level")
+	level, levelErr := strconv.ParseInt(levelText, 10, 64)
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
 	ids := make([]interface{}, 0)
@@ -1007,6 +1049,9 @@ func AgentReportFormList(ctx *gin.Context) {
 		querys = append(querys, elastic.NewRangeQuery("createAt").Gte(startTime).Lte(endTime))
 	}
 	querys = append(querys, elastic.NewTermQuery("agentId", agentId))
+	if levelErr == nil && levelText != "" && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
+	}
 	if len(ids) > 0 {
 		querys = append(querys, elastic.NewTermsQuery("gameId", ids...))
 	}
@@ -1111,6 +1156,8 @@ func ReportFormHistory(ctx *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 	agentId, agentIdError := strconv.Atoi(ctx.Query("agentId"))
+	levelText := ctx.Query("level")
+	level, levelErr := strconv.Atoi(levelText)
 	startTime, _ := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, _ := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
 	str := ctx.Query("gameId")
@@ -1130,6 +1177,9 @@ func ReportFormHistory(ctx *gin.Context) {
 	}
 	if agentIdError == nil {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
+	}
+	if levelErr == nil && levelText != "" && level >= 0 {
+		querys = append(querys, elastic.NewTermQuery("level", level))
 	}
 	if len(ids) > 0 {
 		querys = append(querys, elastic.NewTermsQuery("gameId", ids...))

@@ -59,6 +59,15 @@ type Pool struct {
 	Pool   map[int32]*PoolItem `json:"pool"`
 }
 
+func RoomLevelName(symbol string, level uint32) string {
+	if levels, ok := roomLevelNameMap[symbol]; ok {
+		if name, ok := levels[level]; ok {
+			return name
+		}
+	}
+	return ""
+}
+
 const (
 	POOL_BREAK_DOWN = -1
 	POOL_LOW        = 0
@@ -301,11 +310,13 @@ func (cfg *Configs) GetAwardOddsConfigWithProfitOdds(symbol string, odds decimal
 }
 
 type DataItem struct {
-	UserId  int             `json:"userId"`
-	GameId  int             `json:"gameId"`
-	AgentId int             `json:"agentId"`
-	Eff     decimal.Decimal `json:"bet"`
-	Pro     decimal.Decimal `json:"win"`
+	UserId    int             `json:"userId"`
+	GameId    int             `json:"gameId"`
+	AgentId   int             `json:"agentId"`
+	Level     int             `json:"level"`
+	LevelName string          `json:"levelName"`
+	Eff       decimal.Decimal `json:"bet"`
+	Pro       decimal.Decimal `json:"win"`
 }
 
 type RankResult struct {

@@ -709,7 +709,7 @@ func (d *LotteryService) BulkPoolLog(data []*view.PoolLogItem) error {
 }
 
 // ConvertRecord 将结算金额和抽水按玩家币种及 CNY 两种口径写入注单。
-func ConvertRecord(agentId, userId uint32, recordID, currencyType, symbol, account, log string, newCurrency decimal.Decimal, webID uint32, complete bool, totalBet, win, pumpAmount float64) *entity.CacheRecordsReq {
+func ConvertRecord(agentId, userId, level uint32, recordID, currencyType, symbol, account, log string, newCurrency decimal.Decimal, webID uint32, complete bool, totalBet, win, pumpAmount float64) *entity.CacheRecordsReq {
 	rate, _ := config.CfgIns.GetExchange(currencyType)
 	p := config.CfgIns.GetPoolCfg(int64(agentId), symbol)
 	bet := decimal.NewFromFloat(totalBet)
@@ -729,6 +729,8 @@ func ConvertRecord(agentId, userId uint32, recordID, currencyType, symbol, accou
 		WebId:          webID,
 		UserId:         userId,
 		AgentId:        agentId,
+		Level:          level,
+		LevelName:      config.RoomLevelName(symbol, level),
 		GameId:         uint32(p.GameId),
 		Account:        account,
 		NickName:       account,
@@ -1654,7 +1656,7 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		}
 		newCurrency := decimalFromCent(currentCurrency).Truncate(2)
 		account := dao.CacheIns().GetPlayerAccount(int64(req.Agent), int64(item.userID))
-		record := ConvertRecord(req.Agent, item.userID, req.RoundId, item.currencyType, runtime.Symbol, account, item.record, newCurrency, runtime.WebID, true, item.betAmount.InexactFloat64(), item.payout.InexactFloat64(), item.pump.InexactFloat64())
+		record := ConvertRecord(req.Agent, item.userID, req.Level, req.RoundId, item.currencyType, runtime.Symbol, account, item.record, newCurrency, runtime.WebID, true, item.betAmount.InexactFloat64(), item.payout.InexactFloat64(), item.pump.InexactFloat64())
 		d.SaveRecord(record)
 		if item.payout.GreaterThan(decimal.Zero) {
 			desc := "settlement"
