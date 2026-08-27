@@ -179,6 +179,8 @@ type ServerTime struct {
 type ReportFormItem struct {
 	AgentId            int64   `json:"agentId"`
 	GameId             int     `json:"gameId"`
+	Level              int64   `json:"level"`
+	LevelName          string  `json:"levelName"`
 	DocCount           int     `json:"doc_count"`
 	ProfitLossTotal    float64 `json:"profitLossTotal"`
 	ChipsTotal         float64 `json:"chipsTotal"`

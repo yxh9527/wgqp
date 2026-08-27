@@ -470,7 +470,7 @@ export default {
     openDetail(row) {
       const query = {
         webId: this.webId,
-        agent: row.agentId,
+        agentId: row.agentId,
       };
       if (this.searchData.startTime) {
         query.startTime = this.searchData.startTime;

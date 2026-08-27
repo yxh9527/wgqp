@@ -1,4 +1,4 @@
-package v2
+﻿package v2
 
 import (
 	"app/config"
@@ -937,8 +937,6 @@ func GetAgentGameDataAggs(ctx *gin.Context) {
 	agentId, ae := strconv.ParseInt(ctx.Query("agentId"), 10, 64)
 	startTime, se := strconv.ParseInt(ctx.Query("startTime"), 10, 0)
 	endTime, ee := strconv.ParseInt(ctx.Query("endTime"), 10, 0)
-	levelText := ctx.Query("level")
-	level, levelErr := strconv.ParseInt(levelText, 10, 64)
 	querys := make([]elastic.Query, 0)
 	if se == nil && ee == nil {
 		querys = append(querys, elastic.NewRangeQuery("createAt").Gte(startTime).Lt(endTime))
@@ -946,22 +944,23 @@ func GetAgentGameDataAggs(ctx *gin.Context) {
 	if ae == nil {
 		querys = append(querys, elastic.NewTermQuery("agentId", agentId))
 	}
-	if levelErr == nil && levelText != "" && level >= 0 {
-		querys = append(querys, elastic.NewTermQuery("level", level))
-	}
 	boolQuery := elastic.NewBoolQuery().Must(querys...)
-	aggs := elastic.NewTermsAggregation().Field("gameId").Size(10000)
-	aggs.SubAggregation("effectiveBetsTotal", elastic.NewSumAggregation().Field("effectiveBetsTotal"))
-	aggs.SubAggregation("profitLossTotal", elastic.NewSumAggregation().Field("profitLossTotal"))
-	aggs.SubAggregation("pumpTotal", elastic.NewSumAggregation().Field("pumpTotal"))
-	aggs.SubAggregation("userTotal", elastic.NewSumAggregation().Field("userTotal"))
-	aggs.SubAggregation("revenueTotal", elastic.NewSumAggregation().Field("revenueTotal"))
-	aggs.SubAggregation("chipsTotal", elastic.NewSumAggregation().Field("chipsTotal"))
-	aggs.SubAggregation("docCount", elastic.NewSumAggregation().Field("doc_count"))
+	levelAggs := elastic.NewTermsAggregation().Field("level").Size(32)
+	levelAggs.SubAggregation("effectiveBetsTotal", elastic.NewSumAggregation().Field("effectiveBetsTotal"))
+	levelAggs.SubAggregation("profitLossTotal", elastic.NewSumAggregation().Field("profitLossTotal"))
+	levelAggs.SubAggregation("pumpTotal", elastic.NewSumAggregation().Field("pumpTotal"))
+	levelAggs.SubAggregation("userTotal", elastic.NewSumAggregation().Field("userTotal"))
+	levelAggs.SubAggregation("revenueTotal", elastic.NewSumAggregation().Field("revenueTotal"))
+	levelAggs.SubAggregation("chipsTotal", elastic.NewSumAggregation().Field("chipsTotal"))
+	levelAggs.SubAggregation("docCount", elastic.NewSumAggregation().Field("doc_count"))
+	gameAggs := elastic.NewTermsAggregation().Field("gameId").Size(10000)
+	gameAggs.SubAggregation("level", levelAggs)
+	agentAggs := elastic.NewTermsAggregation().Field("agentId").Size(10000)
+	agentAggs.SubAggregation("gameId", gameAggs)
 	resp, err := dao.Es().Search().Index("pp_data_analysis").
 		Size(0).
 		Query(boolQuery).
-		Aggregation("gameId", aggs).
+		Aggregation("agentId", agentAggs).
 		Pretty(true).
 		Do(context.Background())
 	if err != nil {
@@ -977,55 +976,72 @@ func GetAgentGameDataAggs(ctx *gin.Context) {
 	result := entity.AgentGameAggs{
 		Data: make([]*entity.ReportFormItem, 0, 64),
 	}
-	gameAggs, ok := resp.Aggregations.Terms("gameId")
+	agentAggsResult, ok := resp.Aggregations.Terms("agentId")
 	if !ok {
 		ctx.JSON(http.StatusOK, &entity.Response{Code: http.StatusInternalServerError, Msg: "获取统计结果失败"})
 		return
 	}
-	for _, v := range gameAggs.Buckets {
-		gameId, _ := v.Key.(float64)
-		item := &entity.ReportFormItem{}
-		item.AgentId = agentId
-		item.AgentName = agents[0].NickName
-		item.GameId = int(gameId)
-		cfg := config.CfgIns.GetPoolCfgByGameId(agentId, int64(gameId))
-		if cfg != nil {
-			if len(cfg.NameZH) > 0 {
-				item.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
-			} else {
-				item.GameName = cfg.Name
+	for _, agentBucket := range agentAggsResult.Buckets {
+		bucketAgentId, _ := agentBucket.Key.(float64)
+		games, ok := agentBucket.Aggregations.Terms("gameId")
+		if !ok {
+			continue
+		}
+		for _, gameBucket := range games.Buckets {
+			gameId, _ := gameBucket.Key.(float64)
+			levels, ok := gameBucket.Aggregations.Terms("level")
+			if !ok {
+				continue
 			}
-			item.Symbol = cfg.Symbol
+			cfg := config.CfgIns.GetPoolCfgByGameId(agentId, int64(gameId))
+			for _, levelBucket := range levels.Buckets {
+				level, _ := levelBucket.Key.(float64)
+				item := &entity.ReportFormItem{
+					AgentId:   int64(bucketAgentId),
+					AgentName: agents[0].NickName,
+					GameId:    int(gameId),
+					Level:     int64(level),
+				}
+				if cfg != nil {
+					if len(cfg.NameZH) > 0 {
+						item.GameName = fmt.Sprintf("%s [%s]", cfg.Name, cfg.NameZH)
+					} else {
+						item.GameName = cfg.Name
+					}
+					item.Symbol = cfg.Symbol
+					item.LevelName = config.RoomLevelName(cfg.Symbol, uint32(level))
+				}
+				d, b := levelBucket.Sum("effectiveBetsTotal")
+				if b {
+					item.EffectiveBetsTotal = *d.Value
+				}
+				d, b = levelBucket.Sum("profitLossTotal")
+				if b {
+					item.ProfitLossTotal = *d.Value
+				}
+				d, b = levelBucket.Sum("pumpTotal")
+				if b {
+					item.PumpTotal = *d.Value
+				}
+				d, b = levelBucket.Sum("userTotal")
+				if b {
+					item.UserTotal = int(*d.Value)
+				}
+				d, b = levelBucket.Sum("revenueTotal")
+				if b {
+					item.RevenueTotal = *d.Value
+				}
+				d, b = levelBucket.Sum("docCount")
+				if b {
+					item.Doc2Count = int(*d.Value)
+				}
+				d, b = levelBucket.Sum("chipsTotal")
+				if b {
+					item.ChipsTotal = *d.Value
+				}
+				result.Data = append(result.Data, item)
+			}
 		}
-		d, b := v.Sum("effectiveBetsTotal")
-		if b {
-			item.EffectiveBetsTotal = *d.Value
-		}
-		d, b = v.Sum("profitLossTotal")
-		if b {
-			item.ProfitLossTotal = *d.Value
-		}
-		d, b = v.Sum("pumpTotal")
-		if b {
-			item.PumpTotal = *d.Value
-		}
-		d, b = v.Sum("userTotal")
-		if b {
-			item.UserTotal = int(*d.Value)
-		}
-		d, b = v.Sum("revenueTotal")
-		if b {
-			item.RevenueTotal = *d.Value
-		}
-		d, b = v.Sum("docCount")
-		if b {
-			item.Doc2Count = int(*d.Value)
-		}
-		d, b = v.Sum("chipsTotal")
-		if b {
-			item.ChipsTotal = *d.Value
-		}
-		result.Data = append(result.Data, item)
 	}
 	ctx.JSON(http.StatusOK, &entity.Response{Code: http.StatusOK, Msg: "成功", Data: result})
 }
