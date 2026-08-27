@@ -81,10 +81,7 @@
           <div>
             <div class="panel-kicker">Pool</div>
             <div class="panel-title panel-title--sm">水池配置</div>
-            <div class="table-toolbar__note">最外层控制卡片中直接展示水池配置，便于快速查看和编辑。</div>
-          </div>
-          <div class="toolbar-actions">
-            <el-button @click="openPoolDialog()">添加配置</el-button>
+            <div class="table-toolbar__note">每一行对应 pool 中的一个房间 level，编辑单个等级不会覆盖其他等级。</div>
           </div>
         </div>
         <app-table :data="poolConfigData" :columns="poolColumns" :loading="loading.pool" />
@@ -206,53 +203,46 @@
       </el-tabs>
     </el-card>
 
-    <el-dialog :title="poolDialogTitle" :visible.sync="poolDialogVisible" width="760px">
-      <div class="dialog-grid">
-        <div class="field-stack">
-          <label>游戏名称</label>
-          <el-input v-model.trim="poolForm.name" disabled />
-        </div>
-        <div class="field-stack">
-          <label>标识</label>
-          <el-input v-model.trim="poolForm.symbol" :disabled="!poolDialogIsAdd" />
-        </div>
-        <div class="field-stack">
-          <label>正常水位</label>
-          <el-input-number v-model="poolForm.normal" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>正常比例</label>
-          <el-input-number v-model="poolForm.normalRate" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>最高水位</label>
-          <el-input-number v-model="poolForm.max" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>最高比例</label>
-          <el-input-number v-model="poolForm.maxRate" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>最低水位</label>
-          <el-input-number v-model="poolForm.min" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>最低比例</label>
-          <el-input-number v-model="poolForm.minRate" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>税收比例</label>
-          <el-input-number v-model="poolForm.revenue" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>基数</label>
-          <el-input-number v-model="poolForm.base" :controls="false" />
-        </div>
-        <div class="field-stack">
-          <label>控制系数</label>
-          <el-input-number v-model="poolForm.control" :controls="false" />
-        </div>
+    <el-dialog :title="poolDialogTitle" :visible.sync="poolDialogVisible" width="1280px">
+      <div class="pool-dialog-meta">
+        <span>{{ poolForm.nameZH ? `${poolForm.name} [${poolForm.nameZH}]` : poolForm.name }}</span>
+        <span>标识：{{ poolForm.symbol }}</span>
+        <span>{{ selectedAgentId === null ? "默认配置" : "代理配置" }}</span>
       </div>
+      <el-table :data="poolFormRows" border stripe class="pool-dialog-table">
+        <el-table-column label="房间等级（Pool Key）" width="150" align="center">
+          <template slot-scope="scope">
+            <span class="pool-level-key">L{{ scope.row.level }} / key={{ scope.row.levelKey }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="正常水位" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.normal" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="正常比例" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.normalRate" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="最高水位" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.max" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="最高比例" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.maxRate" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="最低水位" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.min" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="最低比例" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.minRate" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="税收比例" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.revenue" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="基数" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.base" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="控制系数" width="120" align="center">
+          <template slot-scope="scope"><el-input-number v-model="scope.row.control" :controls="false" /></template>
+        </el-table-column>
+      </el-table>
       <div class="dialog-tip">
         {{ selectedAgentId === null ? "当前保存为默认配置" : "当前保存为代理配置" }}
       </div>
@@ -363,7 +353,6 @@ import {
   getUserControlResetInfo,
   resetPoolNow,
   saveGameAwardConfig,
-  syncAllPoolConfig,
   updateExchangeConfig,
   updateGovernPoolConfig,
   updatePoolResetTimeRange,
@@ -376,6 +365,9 @@ const createPoolForm = () => ({
   name: "",
   nameZH: "",
   symbol: "",
+  level: 1,
+  levelKey: "1",
+  configKey: "",
   normal: 0,
   normalRate: 0,
   max: 0,
@@ -446,9 +438,10 @@ export default {
       poolResetInterval: 7,
       poolNextReset: "",
       poolConfigData: [],
+      poolConfigSources: {},
       poolDialogVisible: false,
-      poolDialogIsAdd: false,
       poolForm: createPoolForm(),
+      poolFormRows: [],
       awardConfigData: [],
       awardDialogVisible: false,
       awardDialogIsAdd: false,
@@ -516,14 +509,14 @@ export default {
       return 0;
     },
     activeRecordCaption() {
-      if (this.activeTab === "game") return "当前游戏下的水池配置数";
+      if (this.activeTab === "game") return "当前游戏下的房间等级配置数";
       if (this.activeTab === "award") return "分段奖励配置条目";
       if (this.activeTab === "stock") return "库存预警相关记录";
       if (this.activeTab === "exchange") return "当前汇率币种数量";
       return "";
     },
     poolDialogTitle() {
-      return this.poolDialogIsAdd ? "添加房间配置" : "修改房间配置";
+      return "修改房间配置";
     },
     awardDialogTitle() {
       return this.awardDialogIsAdd ? "新增分段奖励配置" : "编辑分段奖励配置";
@@ -533,6 +526,13 @@ export default {
     },
     poolColumns() {
       return [
+        {
+          title: "房间等级（Pool Key）",
+          key: "level",
+          width: 150,
+          align: "center",
+          render: (h, { row }) => h("span", { class: "pool-level-key" }, `L${row.level} / key=${row.levelKey}`),
+        },
         { title: "ID", key: "gameId", width: 90, align: "center" },
         { title: "标识", key: "symbol", width: 120, align: "center" },
         {
@@ -553,15 +553,11 @@ export default {
         {
           title: "操作",
           type: "action",
-          width: 168,
+          width: 150,
           buttons: [
             {
               label: "修改",
               onClick: (row) => this.openPoolDialog(row),
-            },
-            {
-              label: "同步",
-              onClick: (row) => this.syncPoolConfig(row),
             },
           ],
         },
@@ -781,6 +777,7 @@ export default {
     async fetchPoolConfigs() {
       if (!this.selectedGameId) {
         this.poolConfigData = [];
+        this.poolConfigSources = {};
         return;
       }
       this.loading.pool = true;
@@ -794,45 +791,56 @@ export default {
         }
         const response = await getGovernPoolList(params);
         const rows = [];
+        const sources = {};
         (response.data.data || []).forEach((item) => {
           if (!item || !item.value || !item.value.pool) return;
-          Object.keys(item.value.pool).forEach((key) => {
-            const pool = item.value.pool[key] || {};
+          const configKey = item.key || this.getPoolConfigKey(item.value.symbol);
+          sources[configKey] = JSON.parse(JSON.stringify(item.value));
+          Object.keys(item.value.pool).forEach((levelKey) => {
+            const pool = item.value.pool[levelKey] || {};
             rows.push({
               ...pool,
               name: item.name,
               nameZH: item.value.nameZH,
               symbol: item.value.symbol,
               gameId: item.value.gameId,
-              key: item.key,
+              level: Number(levelKey),
+              levelKey: String(levelKey),
+              configKey,
             });
           });
         });
-        this.poolConfigData = rows;
+        this.poolConfigSources = sources;
+        this.poolConfigData = rows.sort((a, b) => Number(a.level) - Number(b.level));
       } finally {
         this.loading.pool = false;
       }
     },
     openPoolDialog(row) {
-      if (!row && !this.currentGameMeta) {
-        this.$message.error("请先选择游戏");
+      if (!row) {
+        this.$message.error("请选择已有房间等级配置");
         return;
       }
-      this.poolDialogIsAdd = !row;
-      if (row) {
-        this.poolForm = {
-          ...createPoolForm(),
-          ...JSON.parse(JSON.stringify(row)),
-        };
-      } else {
-        this.poolForm = {
-          ...createPoolForm(),
-          gameId: this.currentGameMeta.number,
-          name: this.currentGameMeta.name,
-          nameZH: this.currentGameMeta.nameZH,
-          symbol: this.currentGameMeta.symbol,
-        };
+      const source = this.poolConfigSources[row.configKey];
+      if (!source || !source.pool) {
+        this.$message.error("未找到完整水池配置，请刷新后重试");
+        return;
       }
+      this.poolForm = {
+        ...createPoolForm(),
+        name: source.name || row.name,
+        nameZH: source.nameZH || row.nameZH,
+        symbol: source.symbol || row.symbol,
+        gameId: source.gameId || row.gameId,
+        configKey: row.configKey,
+      };
+      this.poolFormRows = Object.keys(source.pool)
+        .sort((a, b) => Number(a) - Number(b))
+        .map((levelKey) => ({
+          ...JSON.parse(JSON.stringify(source.pool[levelKey] || {})),
+          level: Number(levelKey),
+          levelKey: String(levelKey),
+        }));
       this.poolDialogVisible = true;
     },
     async savePoolConfig() {
@@ -840,68 +848,49 @@ export default {
         this.$message.error("标识不能为空");
         return;
       }
-      if (Number(this.poolForm.max) <= Number(this.poolForm.min)) {
-        this.$message.error("最高水位不能小于或等于最低水位");
+      if (!this.poolFormRows.length) {
+        this.$message.error("没有可保存的房间等级配置");
         return;
       }
+      const configKey = this.poolForm.configKey || this.getPoolConfigKey(this.poolForm.symbol);
+      const source = JSON.parse(JSON.stringify(this.poolConfigSources[configKey] || {}));
+      const pool = {};
+      for (const row of this.poolFormRows) {
+        if (Number(row.max) <= Number(row.min)) {
+          this.$message.error(`L${row.level} 最高水位不能小于或等于最低水位`);
+          return;
+        }
+        const { level, levelKey, ...poolItem } = row;
+        pool[String(levelKey)] = {
+          ...poolItem,
+          min: Number(row.min),
+          max: Number(row.max),
+          normal: Number(row.normal),
+          minRate: Number(row.minRate),
+          maxRate: Number(row.maxRate),
+          normalRate: Number(row.normalRate),
+          revenue: Number(row.revenue),
+          control: Number(row.control),
+          base: Number(row.base),
+        };
+      }
       const value = {
-        pool: {
-          1: {
-            min: Number(this.poolForm.min),
-            max: Number(this.poolForm.max),
-            normal: Number(this.poolForm.normal),
-            minRate: Number(this.poolForm.minRate),
-            maxRate: Number(this.poolForm.maxRate),
-            normalRate: Number(this.poolForm.normalRate),
-            revenue: Number(this.poolForm.revenue),
-            control: Number(this.poolForm.control),
-            base: Number(this.poolForm.base),
-          },
-        },
+        ...source,
+        pool,
         name: this.poolForm.name,
         nameZH: this.poolForm.nameZH,
         gameId: this.poolForm.gameId,
         symbol: this.poolForm.symbol,
       };
-      const key =
-        this.selectedAgentId !== null
-          ? `/agent/${this.selectedAgentId}/pool/${this.poolForm.symbol}`
-          : `/config/pool/${this.poolForm.symbol}`;
-      await updateGovernPoolConfig({ key, value });
+      await updateGovernPoolConfig({ key: configKey, value });
       this.$message.success("房间配置已保存");
       this.poolDialogVisible = false;
       this.fetchPoolConfigs();
     },
-    async syncPoolConfig(row) {
-      try {
-        await this.$confirm("确认同步该默认水池配置到全部代理？", "提示", { type: "warning" });
-      } catch (error) {
-        return;
-      }
-      const config = {
-        pool: {
-          1: {
-            min: Number(row.min),
-            max: Number(row.max),
-            normal: Number(row.normal),
-            minRate: Number(row.minRate),
-            maxRate: Number(row.maxRate),
-            normalRate: Number(row.normalRate),
-            revenue: Number(row.revenue),
-            control: Number(row.control),
-            base: Number(row.base),
-          },
-        },
-        name: row.name,
-        nameZH: row.nameZH,
-        gameId: row.gameId,
-        symbol: row.symbol,
-      };
-      await syncAllPoolConfig({
-        config: JSON.stringify(config),
-      });
-      this.$message.success("已同步到全部代理");
-      this.fetchPoolConfigs();
+    getPoolConfigKey(symbol) {
+      return this.selectedAgentId !== null
+        ? `/agent/${this.selectedAgentId}/pool/${symbol}`
+        : `/config/pool/${symbol}`;
     },
     async fetchAwardConfigs() {
       this.loading.award = true;
@@ -1536,6 +1525,30 @@ export default {
 
 .field-stack :deep(.el-input-number .el-input__inner) {
   text-align: left;
+}
+
+.pool-level-key {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pool-dialog-table :deep(.el-input-number) {
+  width: 100%;
+}
+
+.pool-dialog-table :deep(.el-input-number .el-input__inner) {
+  width: 100%;
+  padding-right: 8px;
+  padding-left: 8px;
 }
 
 .dialog-tip {
