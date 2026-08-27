@@ -44,6 +44,10 @@ func TestPoolSymbolIncludesLevel(t *testing.T) {
 	if symbol := baseSymbolFromPoolSymbol(poolSymbol); symbol != "table_game" {
 		t.Fatalf("baseSymbolFromPoolSymbol returned %q", symbol)
 	}
+	level, ok := levelFromPoolSymbol(poolSymbol)
+	if !ok || level != 3 {
+		t.Fatalf("levelFromPoolSymbol returned level=%d ok=%v", level, ok)
+	}
 }
 
 func TestIsActiveFinanceBet(t *testing.T) {

@@ -227,6 +227,15 @@ func (cfg *Configs) GetPoolCfg(agentId int64, symbol string) *Pool {
 	return p
 }
 
+// GetPoolItem 按游戏 symbol + 房间 level 取对应水位配置；level 不存在时返回 nil。
+func (cfg *Configs) GetPoolItem(agentId int64, symbol string, level uint32) *PoolItem {
+	p := cfg.GetPoolCfg(agentId, symbol)
+	if p == nil || p.Pool == nil {
+		return nil
+	}
+	return p.Pool[int32(level)]
+}
+
 func (cfg *Configs) GetPoolCfgByGameId(agentId, gameId int64) *Pool {
 	cfg.Lock.RLock()
 	defer cfg.Lock.RUnlock()

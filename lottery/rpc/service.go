@@ -241,6 +241,19 @@ func baseSymbolFromPoolSymbol(symbol string) string {
 	return symbol[:separator]
 }
 
+// levelFromPoolSymbol 从奖池标识 symbol_level 中解析房间 level。
+func levelFromPoolSymbol(symbol string) (uint32, bool) {
+	separator := strings.LastIndex(symbol, "_")
+	if separator < 0 || separator == len(symbol)-1 {
+		return 0, false
+	}
+	level, err := strconv.ParseUint(symbol[separator+1:], 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return uint32(level), true
+}
+
 func roundBetRecordID(roundID, betID string) string {
 	return fmt.Sprintf("%s#%s", roundID, betID)
 }
@@ -604,22 +617,26 @@ func (d *LotteryService) producterPoolLog() {
 				agentID, _ := strconv.ParseInt(arr[0], 10, 64)
 				symbol := arr[1]
 				baseSymbol := baseSymbolFromPoolSymbol(symbol)
-				pcfg := config.CfgIns.GetPoolCfg(agentID, baseSymbol)
-				if pcfg == nil {
+				level, ok := levelFromPoolSymbol(symbol)
+				if !ok {
+					continue
+				}
+				poolItem := config.CfgIns.GetPoolItem(agentID, baseSymbol, level)
+				if poolItem == nil {
 					continue
 				}
 				d.poolChange <- &view.PoolLogItem{
 					AgentId:    int(agentID),
 					Symbol:     symbol,
 					PoolValue:  value.Truncate(2).InexactFloat64(),
-					Normal:     int(pcfg.Pool[1].Normal.IntPart()),
-					NormalRate: pcfg.Pool[1].NormalRate,
-					Min:        int(pcfg.Pool[1].Min.IntPart()),
-					MinRate:    pcfg.Pool[1].MinRate,
-					Max:        int(pcfg.Pool[1].Max.IntPart()),
-					MaxRate:    pcfg.Pool[1].MaxRate,
-					Ctl:        int(pcfg.Pool[1].Control.IntPart()),
-					Revenue:    pcfg.Pool[1].Revenue,
+					Normal:     int(poolItem.Normal.IntPart()),
+					NormalRate: poolItem.NormalRate,
+					Min:        int(poolItem.Min.IntPart()),
+					MinRate:    poolItem.MinRate,
+					Max:        int(poolItem.Max.IntPart()),
+					MaxRate:    poolItem.MaxRate,
+					Ctl:        int(poolItem.Control.IntPart()),
+					Revenue:    poolItem.Revenue,
 					CreateTime: time.Now().Unix(),
 				}
 			}
@@ -712,6 +729,7 @@ func (d *LotteryService) BulkPoolLog(data []*view.PoolLogItem) error {
 func ConvertRecord(agentId, userId, level uint32, recordID, currencyType, symbol, account, log string, newCurrency decimal.Decimal, webID uint32, complete bool, totalBet, win, pumpAmount float64) *entity.CacheRecordsReq {
 	rate, _ := config.CfgIns.GetExchange(currencyType)
 	p := config.CfgIns.GetPoolCfg(int64(agentId), symbol)
+	poolItem := config.CfgIns.GetPoolItem(int64(agentId), symbol, level)
 	bet := decimal.NewFromFloat(totalBet)
 	award := decimal.NewFromFloat(win)
 	pump := decimal.NewFromFloat(pumpAmount)
@@ -724,14 +742,22 @@ func ConvertRecord(agentId, userId, level uint32, recordID, currencyType, symbol
 		account = dao.CacheIns().GetPlayerAccount(int64(agentId), int64(userId))
 	}
 
-	revenue := bet.Mul(p.Pool[int32(level)].Revenue)
+	revenueRate := decimal.Zero
+	if poolItem != nil {
+		revenueRate = poolItem.Revenue
+	}
+	revenue := bet.Mul(revenueRate)
+	gameID := uint32(0)
+	if p != nil {
+		gameID = uint32(p.GameId)
+	}
 	return &entity.CacheRecordsReq{
 		WebId:          webID,
 		UserId:         userId,
 		AgentId:        agentId,
 		Level:          level,
 		LevelName:      config.RoomLevelName(symbol, level),
-		GameId:         uint32(p.GameId),
+		GameId:         gameID,
 		Account:        account,
 		NickName:       account,
 		Bet:            bet.Truncate(4).InexactFloat64(),
@@ -894,6 +920,23 @@ func (d *LotteryService) totalBetCNY(round *financeRound) decimal.Decimal {
 	return total
 }
 
+// canAffordRoundNetPayout 仅当「本局赔付-本局总下注 > 0」时，用旧版 Lottery 可赔付公式判断水池是否够赔。
+// 单人房 / 多人房都按整局净赔付差值判断，不按玩家拆分。单控暂不接入。
+func (d *LotteryService) canAffordRoundNetPayout(
+	agentID uint32,
+	userID uint32,
+	runtime *roundRuntime,
+	totalBetCNY decimal.Decimal,
+	totalPayoutCNY decimal.Decimal,
+) bool {
+	netAward := totalPayoutCNY.Sub(totalBetCNY)
+	if !netAward.IsPositive() {
+		return true
+	}
+	item := config.CfgIns.GetPoolItem(int64(agentID), runtime.Symbol, runtime.Level)
+	return dao.CacheIns().CanAffordAward(int64(agentID), userID, item, runtime.PoolSymbol, runtime.Level, netAward)
+}
+
 // resolveRuntime 校验代理和游戏状态，并解析 symbol、汇率配置所需的可信路由信息。
 func (d *LotteryService) resolveRuntime(agentID, gameID, level uint32) (*roundRuntime, services.ErrorCode) {
 	agent := dao.AgentManagerIns().Get(int64(agentID))
@@ -907,8 +950,8 @@ func (d *LotteryService) resolveRuntime(agentID, gameID, level uint32) (*roundRu
 	if game.IsFrozen == 1 {
 		return nil, services.ErrorCode_GAME_FROZEN
 	}
-	poolCfg := config.CfgIns.GetPoolCfg(int64(agentID), game.ConfName)
-	if poolCfg == nil {
+	poolItem := config.CfgIns.GetPoolItem(int64(agentID), game.ConfName, level)
+	if poolItem == nil {
 		return nil, services.ErrorCode_SYSTEM_ERROR
 	}
 	return &roundRuntime{
@@ -918,7 +961,7 @@ func (d *LotteryService) resolveRuntime(agentID, gameID, level uint32) (*roundRu
 		WebID:      uint32(agent.WebId),
 		Symbol:     game.ConfName,
 		PoolSymbol: buildPoolSymbol(game.ConfName, level),
-		Revenue:    poolCfg.Pool[int32(level)].Revenue,
+		Revenue:    poolItem.Revenue,
 	}, services.ErrorCode_OK
 }
 
@@ -1278,6 +1321,15 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 	}
 	resp.TotalPayoutCny = decimalString(totalPayoutCNY)
 
+	// 够赔按整局净赔付判断：仅当 本局赔付-本局总下注 > 0 时走 Lottery 可赔付公式。
+	totalBet := d.totalBetCNY(round)
+	statsUserID := req.Items[0].UserId
+	if !d.canAffordRoundNetPayout(req.Agent, statsUserID, runtime, totalBet, totalPayoutCNY) {
+		resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
+		resp.Reason = "INSUFFICIENT_POOL"
+		return resp, nil
+	}
+
 	// 已有责任上限预留时，按差额调整奖池占用，而不是直接冲突拒绝。
 	if round.Reservation != nil &&
 		round.Reservation.Status == string(financeStateReserved) &&
@@ -1609,9 +1661,9 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 				return resp, nil
 			}
 		} else if round.State == string(financeStateBetting) && totalPayoutCNY.IsPositive() {
-			// 无预留下的正赔付：必须仍通过可用奖池检查，不能绕过 INSUFFICIENT_POOL。
-			available := dao.CacheIns().GetPool(int64(round.Agent), round.PoolSymbol)
-			if totalPayoutCNY.GreaterThan(available) {
+			// 无预留下的正赔付：与 PrePay 一致，按整局净赔付走 Lottery 可赔付公式。
+			statsUserID := req.Items[0].UserId
+			if !d.canAffordRoundNetPayout(round.Agent, statsUserID, runtime, d.totalBetCNY(round), totalPayoutCNY) {
 				resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
 				return resp, nil
 			}

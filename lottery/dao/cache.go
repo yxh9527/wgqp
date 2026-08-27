@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"app/config"
 	"context"
 	"fmt"
 	"sync"
@@ -128,6 +129,150 @@ func poolValue(game *Game) decimal.Decimal {
 // availablePoolValue 在基础奖池上扣除当前仍然有效的赔付预留。
 func availablePoolValue(game *Game, reserved decimal.Decimal) decimal.Decimal {
 	return poolValue(game).Sub(reserved)
+}
+
+// poolType 按指定房间 level 的水位配置划分低/中/高水位，并返回对应可赔付比例。
+func poolType(pool decimal.Decimal, item *config.PoolItem) (int, decimal.Decimal) {
+	if item == nil {
+		return config.POOL_BREAK_DOWN, decimal.Zero
+	}
+	if pool.LessThanOrEqual(decimal.Zero) {
+		return config.POOL_BREAK_DOWN, decimal.Zero
+	}
+	if pool.LessThanOrEqual(item.Normal) {
+		return config.POOL_LOW, item.MinRate
+	}
+	if pool.LessThanOrEqual(item.Max) {
+		return config.POOL_NORMAL, item.NormalRate
+	}
+	return config.POOL_HIGH, item.MaxRate
+}
+
+// CanAffordAward 参照旧版 Lottery 的可赔付计算（暂不接入单控/自动单控）：
+//
+//	p = min(水池余额*水位比例, 人均有效投注*倍数)
+//	够赔当且仅当 p >= award
+//
+// PrePay 场景下本局下注与税收已入池，award 应传入 max(0, 本局赔付-本局总下注)。
+// 水位/税率/基数均取 symbol + level 对应的 PoolItem。
+func (gcm *GameCacheMgr) CanAffordAward(
+	agentID int64,
+	userID uint32,
+	item *config.PoolItem,
+	symbol string,
+	level uint32,
+	award decimal.Decimal,
+) bool {
+	if !award.IsPositive() {
+		return true
+	}
+	if item == nil || config.CfgIns == nil {
+		zap.L().Debug("CanAffordAward:缺少水池或开奖配置",
+			zap.Int64("agentId", agentID),
+			zap.Uint32("userId", userID),
+			zap.String("symbol", symbol),
+			zap.Uint32("level", level),
+			zap.String("award", award.String()),
+		)
+		return false
+	}
+
+	agent := gcm.GetAgent(agentID)
+	agent.lock.Lock()
+	defer agent.lock.Unlock()
+
+	user := agent.GetUser(userID)
+	game := agent.GetGame(symbol)
+	pool := poolValue(game).Add(item.Base)
+
+	t, r := poolType(pool, item)
+	if t == config.POOL_BREAK_DOWN {
+		zap.L().Debug("CanAffordAward:水池破产",
+			zap.Int64("agentId", agentID),
+			zap.Uint32("userId", userID),
+			zap.String("symbol", symbol),
+			zap.Uint32("level", level),
+			zap.String("pool", pool.String()),
+			zap.String("award", award.String()),
+		)
+		return false
+	}
+
+	rate := decimal.Zero
+	if !user.TotalEffectBet.IsZero() {
+		rate = user.TotalProfLoss.Div(user.TotalEffectBet)
+	}
+	cItems := config.CfgIns.GetAwardOddsConfigWithProfitOdds(symbol, rate)
+	if cItems == nil {
+		cItems = config.CfgIns.GetAwardOddsDefaultCtrlConfig(symbol)
+	}
+	if cItems == nil || t < 0 || t >= len(cItems.PoolOdds) || cItems.PoolOdds[t] == nil {
+		zap.L().Debug("CanAffordAward:缺少水位开奖配置",
+			zap.Int64("agentId", agentID),
+			zap.Uint32("userId", userID),
+			zap.String("symbol", symbol),
+			zap.Uint32("level", level),
+			zap.Int("poolType", t),
+			zap.String("rate", rate.String()),
+		)
+		return false
+	}
+	oddsItem := cItems.PoolOdds[t]
+
+	p1 := pool.Mul(r)
+	cnt := decimal.NewFromInt(1)
+	if !user.Count.IsZero() {
+		cnt = user.Count.Add(decimal.NewFromInt(1))
+	}
+	p2 := user.TotalEffectBet.Div(cnt).Mul(oddsItem.M)
+	p := p1
+	if p1.GreaterThan(p2) {
+		p = p2
+		zap.L().Debug("CanAffordAward:使用平均值",
+			zap.Int64("agentId", agentID),
+			zap.Uint32("userId", userID),
+			zap.String("symbol", symbol),
+			zap.Uint32("level", level),
+			zap.String("payable", p.String()),
+			zap.String("award", award.String()),
+			zap.String("totalEffectBet", user.TotalEffectBet.String()),
+			zap.String("count", user.Count.String()),
+			zap.Any("oddsItem", oddsItem),
+		)
+	} else {
+		zap.L().Debug("CanAffordAward:使用水池值",
+			zap.Int64("agentId", agentID),
+			zap.Uint32("userId", userID),
+			zap.String("symbol", symbol),
+			zap.Uint32("level", level),
+			zap.String("payable", p.String()),
+			zap.String("award", award.String()),
+			zap.String("pool", pool.String()),
+			zap.String("poolRate", r.String()),
+			zap.Any("oddsItem", oddsItem),
+		)
+	}
+
+	if p.LessThan(award) {
+		zap.L().Debug("CanAffordAward:赔付失败",
+			zap.Int64("agentId", agentID),
+			zap.Uint32("userId", userID),
+			zap.String("symbol", symbol),
+			zap.Uint32("level", level),
+			zap.String("payable", p.String()),
+			zap.String("award", award.String()),
+		)
+		return false
+	}
+	zap.L().Debug("CanAffordAward:赔付成功",
+		zap.Int64("agentId", agentID),
+		zap.Uint32("userId", userID),
+		zap.String("symbol", symbol),
+		zap.Uint32("level", level),
+		zap.String("payable", p.String()),
+		zap.String("award", award.String()),
+	)
+	return true
 }
 
 func (gcm *GameCacheMgr) GetPlayerAccount(agentID, userID int64) string {
