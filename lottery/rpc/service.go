@@ -724,7 +724,7 @@ func ConvertRecord(agentId, userId, level uint32, recordID, currencyType, symbol
 		account = dao.CacheIns().GetPlayerAccount(int64(agentId), int64(userId))
 	}
 
-	revenue := bet.Mul(p.Pool[1].Revenue)
+	revenue := bet.Mul(p.Pool[int32(level)].Revenue)
 	return &entity.CacheRecordsReq{
 		WebId:          webID,
 		UserId:         userId,
@@ -918,7 +918,7 @@ func (d *LotteryService) resolveRuntime(agentID, gameID, level uint32) (*roundRu
 		WebID:      uint32(agent.WebId),
 		Symbol:     game.ConfName,
 		PoolSymbol: buildPoolSymbol(game.ConfName, level),
-		Revenue:    poolCfg.Pool[1].Revenue,
+		Revenue:    poolCfg.Pool[int32(level)].Revenue,
 	}, services.ErrorCode_OK
 }
 
