@@ -1448,6 +1448,302 @@ func (x *CancelBetResponse) GetReason() string {
 	return ""
 }
 
+// 单个控制候选：由游戏服预先生成完整结果后，仅上送经济摘要。
+type PoolControlCandidate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 候选唯一编号，例如 win / natural / lose。
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// NATURAL / PLAYER_WIN / PLAYER_LOSE；可空，空则按 id 推断。
+	Mode string `protobuf:"bytes,2,opt,name=mode,proto3" json:"mode,omitempty"`
+	// 该候选下真人总下注（玩家币种）。
+	BetAmount string `protobuf:"bytes,3,opt,name=betAmount,proto3" json:"betAmount,omitempty"`
+	// 该候选下真人总返还 payout（玩家币种，不是净利润）。
+	Payout        string `protobuf:"bytes,4,opt,name=payout,proto3" json:"payout,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PoolControlCandidate) Reset() {
+	*x = PoolControlCandidate{}
+	mi := &file_lottery_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PoolControlCandidate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PoolControlCandidate) ProtoMessage() {}
+
+func (x *PoolControlCandidate) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PoolControlCandidate.ProtoReflect.Descriptor instead.
+func (*PoolControlCandidate) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PoolControlCandidate) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *PoolControlCandidate) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *PoolControlCandidate) GetBetAmount() string {
+	if x != nil {
+		return x.BetAmount
+	}
+	return ""
+}
+
+func (x *PoolControlCandidate) GetPayout() string {
+	if x != nil {
+		return x.Payout
+	}
+	return ""
+}
+
+// 水池控制决策请求。不依赖已有 finance round，可在下注前调用。
+type GetPoolControlDecisionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 请求编号，用于审计；建议同时作为 decisionId 幂等关联键。
+	RequestId string `protobuf:"bytes,1,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	// 可选牌局编号，仅审计用。
+	RoundId string `protobuf:"bytes,2,opt,name=roundId,proto3" json:"roundId,omitempty"`
+	GameId  uint32 `protobuf:"varint,3,opt,name=gameId,proto3" json:"gameId,omitempty"`
+	Agent   uint32 `protobuf:"varint,4,opt,name=agent,proto3" json:"agent,omitempty"`
+	Level   uint32 `protobuf:"varint,5,opt,name=level,proto3" json:"level,omitempty"`
+	// 金额币种；换算 CNY 后参与可赔付判断。
+	CurrencyType string `protobuf:"bytes,6,opt,name=currencyType,proto3" json:"currencyType,omitempty"`
+	// 可选：用于可赔付公式中的玩家统计；0 表示仅按水池水位判断。
+	UserId uint32 `protobuf:"varint,7,opt,name=userId,proto3" json:"userId,omitempty"`
+	// 至少 1 个候选；通常为 win/natural/lose 三套。
+	Candidates []*PoolControlCandidate `protobuf:"bytes,8,rep,name=candidates,proto3" json:"candidates,omitempty"`
+	// 可选偏好模式；仅当该模式候选可赔付时优先采用。
+	PreferredMode string `protobuf:"bytes,9,opt,name=preferredMode,proto3" json:"preferredMode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPoolControlDecisionRequest) Reset() {
+	*x = GetPoolControlDecisionRequest{}
+	mi := &file_lottery_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPoolControlDecisionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPoolControlDecisionRequest) ProtoMessage() {}
+
+func (x *GetPoolControlDecisionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPoolControlDecisionRequest.ProtoReflect.Descriptor instead.
+func (*GetPoolControlDecisionRequest) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetPoolControlDecisionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionRequest) GetRoundId() string {
+	if x != nil {
+		return x.RoundId
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionRequest) GetGameId() uint32 {
+	if x != nil {
+		return x.GameId
+	}
+	return 0
+}
+
+func (x *GetPoolControlDecisionRequest) GetAgent() uint32 {
+	if x != nil {
+		return x.Agent
+	}
+	return 0
+}
+
+func (x *GetPoolControlDecisionRequest) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *GetPoolControlDecisionRequest) GetCurrencyType() string {
+	if x != nil {
+		return x.CurrencyType
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionRequest) GetUserId() uint32 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *GetPoolControlDecisionRequest) GetCandidates() []*PoolControlCandidate {
+	if x != nil {
+		return x.Candidates
+	}
+	return nil
+}
+
+func (x *GetPoolControlDecisionRequest) GetPreferredMode() string {
+	if x != nil {
+		return x.PreferredMode
+	}
+	return ""
+}
+
+// 水池控制决策响应。
+type GetPoolControlDecisionResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Code  ErrorCode              `protobuf:"varint,1,opt,name=code,proto3,enum=base.ErrorCode" json:"code,omitempty"`
+	// NATURAL / PLAYER_WIN / PLAYER_LOSE。
+	Mode string `protobuf:"bytes,2,opt,name=mode,proto3" json:"mode,omitempty"`
+	// 选中的候选 id。
+	SelectedCandidateId string `protobuf:"bytes,3,opt,name=selectedCandidateId,proto3" json:"selectedCandidateId,omitempty"`
+	// 选中候选的 payout（玩家币种原样回传）。
+	MaxPayout string `protobuf:"bytes,4,opt,name=maxPayout,proto3" json:"maxPayout,omitempty"`
+	// 本次决策编号，供游戏服写入 controlPlan / 审计。
+	DecisionId string `protobuf:"bytes,5,opt,name=decisionId,proto3" json:"decisionId,omitempty"`
+	// 决策原因：OK / NO_CANDIDATE / POOL_TIGHT_FALLBACK_LOSE / PREFERRED_UNAVAILABLE 等。
+	Reason string `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`
+	// 选中候选换算后的 CNY 净赔付 max(0, payout-bet)。
+	SelectedNetPayoutCny string `protobuf:"bytes,7,opt,name=selectedNetPayoutCny,proto3" json:"selectedNetPayoutCny,omitempty"`
+	// 当前可用水池 CNY 快照（仅参考，非锁定额度）。
+	PoolAvailableCny string `protobuf:"bytes,8,opt,name=poolAvailableCny,proto3" json:"poolAvailableCny,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetPoolControlDecisionResponse) Reset() {
+	*x = GetPoolControlDecisionResponse{}
+	mi := &file_lottery_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPoolControlDecisionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPoolControlDecisionResponse) ProtoMessage() {}
+
+func (x *GetPoolControlDecisionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_lottery_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPoolControlDecisionResponse.ProtoReflect.Descriptor instead.
+func (*GetPoolControlDecisionResponse) Descriptor() ([]byte, []int) {
+	return file_lottery_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GetPoolControlDecisionResponse) GetCode() ErrorCode {
+	if x != nil {
+		return x.Code
+	}
+	return ErrorCode_OK
+}
+
+func (x *GetPoolControlDecisionResponse) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionResponse) GetSelectedCandidateId() string {
+	if x != nil {
+		return x.SelectedCandidateId
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionResponse) GetMaxPayout() string {
+	if x != nil {
+		return x.MaxPayout
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionResponse) GetDecisionId() string {
+	if x != nil {
+		return x.DecisionId
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionResponse) GetSelectedNetPayoutCny() string {
+	if x != nil {
+		return x.SelectedNetPayoutCny
+	}
+	return ""
+}
+
+func (x *GetPoolControlDecisionResponse) GetPoolAvailableCny() string {
+	if x != nil {
+		return x.PoolAvailableCny
+	}
+	return ""
+}
+
 var File_lottery_proto protoreflect.FileDescriptor
 
 const file_lottery_proto_rawDesc = "" +
@@ -1579,14 +1875,43 @@ const file_lottery_proto_rawDesc = "" +
 	"\aroundId\x18\b \x01(\tR\aroundId\x12\x14\n" +
 	"\x05state\x18\t \x01(\tR\x05state\x12\x16\n" +
 	"\x06reason\x18\n" +
-	" \x01(\tR\x06reason2\xe5\x02\n" +
+	" \x01(\tR\x06reason\"p\n" +
+	"\x14PoolControlCandidate\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04mode\x18\x02 \x01(\tR\x04mode\x12\x1c\n" +
+	"\tbetAmount\x18\x03 \x01(\tR\tbetAmount\x12\x16\n" +
+	"\x06payout\x18\x04 \x01(\tR\x06payout\"\xbc\x02\n" +
+	"\x1dGetPoolControlDecisionRequest\x12\x1c\n" +
+	"\trequestId\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\aroundId\x18\x02 \x01(\tR\aroundId\x12\x16\n" +
+	"\x06gameId\x18\x03 \x01(\rR\x06gameId\x12\x14\n" +
+	"\x05agent\x18\x04 \x01(\rR\x05agent\x12\x14\n" +
+	"\x05level\x18\x05 \x01(\rR\x05level\x12\"\n" +
+	"\fcurrencyType\x18\x06 \x01(\tR\fcurrencyType\x12\x16\n" +
+	"\x06userId\x18\a \x01(\rR\x06userId\x12=\n" +
+	"\n" +
+	"candidates\x18\b \x03(\v2\x1d.lottery.PoolControlCandidateR\n" +
+	"candidates\x12$\n" +
+	"\rpreferredMode\x18\t \x01(\tR\rpreferredMode\"\xc2\x02\n" +
+	"\x1eGetPoolControlDecisionResponse\x12$\n" +
+	"\x04code\x18\x01 \x01(\x0e2\x10.base.error_codeR\x04code\x12\x12\n" +
+	"\x04mode\x18\x02 \x01(\tR\x04mode\x120\n" +
+	"\x13selectedCandidateId\x18\x03 \x01(\tR\x13selectedCandidateId\x12\x1c\n" +
+	"\tmaxPayout\x18\x04 \x01(\tR\tmaxPayout\x12\x1e\n" +
+	"\n" +
+	"decisionId\x18\x05 \x01(\tR\n" +
+	"decisionId\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\x122\n" +
+	"\x14selectedNetPayoutCny\x18\a \x01(\tR\x14selectedNetPayoutCny\x12*\n" +
+	"\x10poolAvailableCny\x18\b \x01(\tR\x10poolAvailableCny2\xd0\x03\n" +
 	"\x0eLotteryService\x120\n" +
 	"\x03Bet\x12\x13.lottery.BetRequest\x1a\x14.lottery.BetResponse\x129\n" +
 	"\x06PrePay\x12\x16.lottery.PrePayRequest\x1a\x17.lottery.PrePayResponse\x12E\n" +
 	"\n" +
 	"Settlement\x12\x1a.lottery.SettlementRequest\x1a\x1b.lottery.SettlementResponse\x12[\n" +
 	"\x14GetRoundFinanceState\x12 .lottery.GetRoundFinanceStateReq\x1a!.lottery.GetRoundFinanceStateResp\x12B\n" +
-	"\tCancelBet\x12\x19.lottery.CancelBetRequest\x1a\x1a.lottery.CancelBetResponseB\x15Z\x13./services;servicesb\x06proto3"
+	"\tCancelBet\x12\x19.lottery.CancelBetRequest\x1a\x1a.lottery.CancelBetResponse\x12i\n" +
+	"\x16GetPoolControlDecision\x12&.lottery.GetPoolControlDecisionRequest\x1a'.lottery.GetPoolControlDecisionResponseB\x15Z\x13./services;servicesb\x06proto3"
 
 var (
 	file_lottery_proto_rawDescOnce sync.Once
@@ -1600,54 +1925,61 @@ func file_lottery_proto_rawDescGZIP() []byte {
 	return file_lottery_proto_rawDescData
 }
 
-var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_lottery_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_lottery_proto_goTypes = []any{
-	(*BetItem)(nil),                  // 0: lottery.BetItem
-	(*BetRequest)(nil),               // 1: lottery.BetRequest
-	(*BetItemResult)(nil),            // 2: lottery.BetItemResult
-	(*BetResponse)(nil),              // 3: lottery.BetResponse
-	(*PrePayItem)(nil),               // 4: lottery.PrePayItem
-	(*PrePayRequest)(nil),            // 5: lottery.PrePayRequest
-	(*PrePayResponse)(nil),           // 6: lottery.PrePayResponse
-	(*SettlementItem)(nil),           // 7: lottery.SettlementItem
-	(*SettlementRequest)(nil),        // 8: lottery.SettlementRequest
-	(*SettlementItemResult)(nil),     // 9: lottery.SettlementItemResult
-	(*SettlementResponse)(nil),       // 10: lottery.SettlementResponse
-	(*GetRoundFinanceStateReq)(nil),  // 11: lottery.GetRoundFinanceStateReq
-	(*GetRoundFinanceStateResp)(nil), // 12: lottery.GetRoundFinanceStateResp
-	(*CancelBetRequest)(nil),         // 13: lottery.CancelBetRequest
-	(*CancelBetResponse)(nil),        // 14: lottery.CancelBetResponse
-	(ErrorCode)(0),                   // 15: base.error_code
+	(*BetItem)(nil),                        // 0: lottery.BetItem
+	(*BetRequest)(nil),                     // 1: lottery.BetRequest
+	(*BetItemResult)(nil),                  // 2: lottery.BetItemResult
+	(*BetResponse)(nil),                    // 3: lottery.BetResponse
+	(*PrePayItem)(nil),                     // 4: lottery.PrePayItem
+	(*PrePayRequest)(nil),                  // 5: lottery.PrePayRequest
+	(*PrePayResponse)(nil),                 // 6: lottery.PrePayResponse
+	(*SettlementItem)(nil),                 // 7: lottery.SettlementItem
+	(*SettlementRequest)(nil),              // 8: lottery.SettlementRequest
+	(*SettlementItemResult)(nil),           // 9: lottery.SettlementItemResult
+	(*SettlementResponse)(nil),             // 10: lottery.SettlementResponse
+	(*GetRoundFinanceStateReq)(nil),        // 11: lottery.GetRoundFinanceStateReq
+	(*GetRoundFinanceStateResp)(nil),       // 12: lottery.GetRoundFinanceStateResp
+	(*CancelBetRequest)(nil),               // 13: lottery.CancelBetRequest
+	(*CancelBetResponse)(nil),              // 14: lottery.CancelBetResponse
+	(*PoolControlCandidate)(nil),           // 15: lottery.PoolControlCandidate
+	(*GetPoolControlDecisionRequest)(nil),  // 16: lottery.GetPoolControlDecisionRequest
+	(*GetPoolControlDecisionResponse)(nil), // 17: lottery.GetPoolControlDecisionResponse
+	(ErrorCode)(0),                         // 18: base.error_code
 }
 var file_lottery_proto_depIdxs = []int32{
 	0,  // 0: lottery.BetRequest.items:type_name -> lottery.BetItem
-	15, // 1: lottery.BetItemResult.code:type_name -> base.error_code
-	15, // 2: lottery.BetResponse.code:type_name -> base.error_code
+	18, // 1: lottery.BetItemResult.code:type_name -> base.error_code
+	18, // 2: lottery.BetResponse.code:type_name -> base.error_code
 	2,  // 3: lottery.BetResponse.items:type_name -> lottery.BetItemResult
 	4,  // 4: lottery.PrePayRequest.items:type_name -> lottery.PrePayItem
-	15, // 5: lottery.PrePayResponse.code:type_name -> base.error_code
+	18, // 5: lottery.PrePayResponse.code:type_name -> base.error_code
 	7,  // 6: lottery.SettlementRequest.items:type_name -> lottery.SettlementItem
-	15, // 7: lottery.SettlementItemResult.code:type_name -> base.error_code
-	15, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
+	18, // 7: lottery.SettlementItemResult.code:type_name -> base.error_code
+	18, // 8: lottery.SettlementResponse.code:type_name -> base.error_code
 	9,  // 9: lottery.SettlementResponse.items:type_name -> lottery.SettlementItemResult
-	15, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
+	18, // 10: lottery.GetRoundFinanceStateResp.code:type_name -> base.error_code
 	4,  // 11: lottery.GetRoundFinanceStateResp.reservedItems:type_name -> lottery.PrePayItem
-	15, // 12: lottery.CancelBetResponse.code:type_name -> base.error_code
-	1,  // 13: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
-	5,  // 14: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
-	8,  // 15: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
-	11, // 16: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
-	13, // 17: lottery.LotteryService.CancelBet:input_type -> lottery.CancelBetRequest
-	3,  // 18: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
-	6,  // 19: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
-	10, // 20: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
-	12, // 21: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
-	14, // 22: lottery.LotteryService.CancelBet:output_type -> lottery.CancelBetResponse
-	18, // [18:23] is the sub-list for method output_type
-	13, // [13:18] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	18, // 12: lottery.CancelBetResponse.code:type_name -> base.error_code
+	15, // 13: lottery.GetPoolControlDecisionRequest.candidates:type_name -> lottery.PoolControlCandidate
+	18, // 14: lottery.GetPoolControlDecisionResponse.code:type_name -> base.error_code
+	1,  // 15: lottery.LotteryService.Bet:input_type -> lottery.BetRequest
+	5,  // 16: lottery.LotteryService.PrePay:input_type -> lottery.PrePayRequest
+	8,  // 17: lottery.LotteryService.Settlement:input_type -> lottery.SettlementRequest
+	11, // 18: lottery.LotteryService.GetRoundFinanceState:input_type -> lottery.GetRoundFinanceStateReq
+	13, // 19: lottery.LotteryService.CancelBet:input_type -> lottery.CancelBetRequest
+	16, // 20: lottery.LotteryService.GetPoolControlDecision:input_type -> lottery.GetPoolControlDecisionRequest
+	3,  // 21: lottery.LotteryService.Bet:output_type -> lottery.BetResponse
+	6,  // 22: lottery.LotteryService.PrePay:output_type -> lottery.PrePayResponse
+	10, // 23: lottery.LotteryService.Settlement:output_type -> lottery.SettlementResponse
+	12, // 24: lottery.LotteryService.GetRoundFinanceState:output_type -> lottery.GetRoundFinanceStateResp
+	14, // 25: lottery.LotteryService.CancelBet:output_type -> lottery.CancelBetResponse
+	17, // 26: lottery.LotteryService.GetPoolControlDecision:output_type -> lottery.GetPoolControlDecisionResponse
+	21, // [21:27] is the sub-list for method output_type
+	15, // [15:21] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_lottery_proto_init() }
@@ -1662,7 +1994,7 @@ func file_lottery_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lottery_proto_rawDesc), len(file_lottery_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

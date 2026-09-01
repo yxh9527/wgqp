@@ -1775,7 +1775,15 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 	return resp, nil
 }
 
-// GetRoundFinanceState 返回可用于超时重试和故障恢复的牌局资金快照。
+// GetRoundFinanceState 按 roundId 返回牌局资金快照，供第三方在 RPC 超时、服务重启
+// 或人工对账时确认 Lottery 已经处理到哪一步。
+//
+// 该方法不是下注、预赔、结算或退款接口。调用方应重点使用 state、betDigest、
+// reservationId、settlementId 和 betRevision 决定后续动作，并在重试时继续复用
+// 原有的 betId、requestId 或 settlementId，避免产生重复资金操作。
+//
+// 注意：查询前会检查预赔是否已经过期；如果已过期，查询可能会释放预赔并将牌局
+// 推进到 EXPIRED。因此它对调用方表现为查询接口，但内部可能产生一次状态变更。
 func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.GetRoundFinanceStateReq) (resp *services.GetRoundFinanceStateResp, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1799,6 +1807,7 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 
 	round, ok := d.loadRoundLocked(req.RoundId)
 	if !ok {
+		// ROUND_NOT_FOUND 时不能仅依据默认 state=BETTING 判断牌局存在。
 		resp.Code = services.ErrorCode_ROUND_NOT_FOUND
 		resp.State = string(financeStateBetting)
 		resp.BetDigest = ""
@@ -1807,6 +1816,7 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 		resp.TotalReservedCny = "0"
 		return resp, nil
 	}
+	// 查询前主动检查过期预赔，确保返回的状态和预留金额是最新可用结果。
 	d.expireRoundIfNeededLocked(round)
 
 	resp.State = round.State

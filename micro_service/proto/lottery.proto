@@ -18,6 +18,9 @@ service LotteryService {
     // 百人玩家主动取消本局 ACTIVE 投注；退款金额由资金侧按 ACTIVE 投注计算，不由游戏服传入。
     // 禁止用 PrePay/Settlement/VOID_REFUND 代替本接口。成功后牌局仍保持 BETTING。
     rpc CancelBet(CancelBetRequest) returns (CancelBetResponse);
+    // 只读水池控制决策：游戏服提交 win/natural/lose 等候选的 bet/payout，
+    // 资金侧根据水池可赔付能力选择一套结果。不扣款、不预留、不改账本。
+    rpc GetPoolControlDecision(GetPoolControlDecisionRequest) returns (GetPoolControlDecisionResponse);
 }
 
 // 单笔下注。金额使用玩家币种的十进制字符串，最多保留两位小数。
@@ -224,4 +227,54 @@ message CancelBetResponse {
     // 成功后仍为 BETTING。
     string state = 9;
     string reason = 10;
+}
+
+// 单个控制候选：由游戏服预先生成完整结果后，仅上送经济摘要。
+message PoolControlCandidate {
+    // 候选唯一编号，例如 win / natural / lose。
+    string id = 1;
+    // NATURAL / PLAYER_WIN / PLAYER_LOSE；可空，空则按 id 推断。
+    string mode = 2;
+    // 该候选下真人总下注（玩家币种）。
+    string betAmount = 3;
+    // 该候选下真人总返还 payout（玩家币种，不是净利润）。
+    string payout = 4;
+}
+
+// 水池控制决策请求。不依赖已有 finance round，可在下注前调用。
+message GetPoolControlDecisionRequest {
+    // 请求编号，用于审计；建议同时作为 decisionId 幂等关联键。
+    string requestId = 1;
+    // 可选牌局编号，仅审计用。
+    string roundId = 2;
+    uint32 gameId = 3;
+    uint32 agent = 4;
+    uint32 level = 5;
+    // 金额币种；换算 CNY 后参与可赔付判断。
+    string currencyType = 6;
+    // 可选：用于可赔付公式中的玩家统计；0 表示仅按水池水位判断。
+    uint32 userId = 7;
+    // 至少 1 个候选；通常为 win/natural/lose 三套。
+    repeated PoolControlCandidate candidates = 8;
+    // 可选偏好模式；仅当该模式候选可赔付时优先采用。
+    string preferredMode = 9;
+}
+
+// 水池控制决策响应。
+message GetPoolControlDecisionResponse {
+    base.error_code code = 1;
+    // NATURAL / PLAYER_WIN / PLAYER_LOSE。
+    string mode = 2;
+    // 选中的候选 id。
+    string selectedCandidateId = 3;
+    // 选中候选的 payout（玩家币种原样回传）。
+    string maxPayout = 4;
+    // 本次决策编号，供游戏服写入 controlPlan / 审计。
+    string decisionId = 5;
+    // 决策原因：OK / NO_CANDIDATE / POOL_TIGHT_FALLBACK_LOSE / PREFERRED_UNAVAILABLE 等。
+    string reason = 6;
+    // 选中候选换算后的 CNY 净赔付 max(0, payout-bet)。
+    string selectedNetPayoutCny = 7;
+    // 当前可用水池 CNY 快照（仅参考，非锁定额度）。
+    string poolAvailableCny = 8;
 }
