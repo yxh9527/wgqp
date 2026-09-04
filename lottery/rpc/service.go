@@ -933,7 +933,21 @@ func (d *LotteryService) canAffordRoundNetPayout(
 	if !netAward.IsPositive() {
 		return true
 	}
+	poolCfg := config.CfgIns.GetPoolCfg(int64(agentID), runtime.Symbol)
 	item := config.CfgIns.GetPoolItem(int64(agentID), runtime.Symbol, runtime.Level)
+	zap.L().Debug("canAffordRoundNetPayout:使用水池配置",
+		zap.Uint32("agentId", agentID),
+		zap.Uint32("userId", userID),
+		zap.Uint32("gameId", runtime.GameID),
+		zap.String("symbol", runtime.Symbol),
+		zap.String("poolSymbol", runtime.PoolSymbol),
+		zap.Uint32("level", runtime.Level),
+		zap.String("netAward", netAward.String()),
+		zap.String("totalBetCNY", totalBetCNY.String()),
+		zap.String("totalPayoutCNY", totalPayoutCNY.String()),
+		zap.Any("poolConfig", poolCfg),
+		zap.Any("poolItem", item),
+	)
 	return dao.CacheIns().CanAffordAward(int64(agentID), userID, item, runtime.PoolSymbol, runtime.Level, netAward)
 }
 
