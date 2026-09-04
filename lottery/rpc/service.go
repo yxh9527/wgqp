@@ -1116,7 +1116,10 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 			continue
 		}
 		amount, parseErr := parseMoney(item.Amount)
-		if parseErr != nil || !amount.GreaterThan(decimal.Zero) {
+		// 允许 amount=0，仅作为流局路径的占位下注：
+		// 最终必须在 Settlement 满足 bet=0 且 盈亏(profit)=0，否则拒绝。
+		// Bet 阶段尚不知盈亏，这里只落快照、不改积分。
+		if parseErr != nil {
 			snapshot.Message = "amount is invalid"
 			resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
 			continue
@@ -1128,9 +1131,17 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 			resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
 			continue
 		}
-		delta := -toCentDelta(amount)
-		// Redis 脚本在一次原子操作中完成余额存在性、非负校验和扣款。
-		newCurrency, currencyCode := d.updatePlayerCurrency(item.UserId, delta)
+		isZeroBet := amount.IsZero()
+		var newCurrency int64
+		var currencyCode services.ErrorCode
+		if isZeroBet {
+			// 零下注占位：只读取当前余额，不扣款。
+			newCurrency, currencyCode = d.getPlayerCurrency(item.UserId)
+		} else {
+			delta := -toCentDelta(amount)
+			// Redis 脚本在一次原子操作中完成余额存在性、非负校验和扣款。
+			newCurrency, currencyCode = d.updatePlayerCurrency(item.UserId, delta)
+		}
 		if currencyCode != services.ErrorCode_OK {
 			snapshot.Code = int32(currencyCode)
 			snapshot.Message = "balance update failed"
@@ -1151,11 +1162,14 @@ func (d *LotteryService) Bet(_ context.Context, req *services.BetRequest) (resp 
 		round.Bets[item.BetId] = snapshot
 		shouldSave = true
 
-		if !d.testSkipPoolSideEffects {
-			dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.UserId, runtime.PoolSymbol, item.CurrencyType, roundBetRecordID(req.RoundId, item.BetId), amountCNY, decimal.Zero, revenueCNY)
-			d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
+		// 零下注不改奖池、不写扣款流水；仍落 round 注单快照供 Settlement 对账。
+		if !isZeroBet {
+			if !d.testSkipPoolSideEffects {
+				dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.UserId, runtime.PoolSymbol, item.CurrencyType, roundBetRecordID(req.RoundId, item.BetId), amountCNY, decimal.Zero, revenueCNY)
+				d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
+			}
+			d.SaveBill(req.Agent, item.UserId, amount.Neg(), decimalFromCent(newCurrency).Truncate(2).InexactFloat64(), runtime.Symbol, "bet", item.CurrencyType, req.RoundId)
 		}
-		d.SaveBill(req.Agent, item.UserId, amount.Neg(), decimalFromCent(newCurrency).Truncate(2).InexactFloat64(), runtime.Symbol, "bet", item.CurrencyType, req.RoundId)
 
 		resp.Items = append(resp.Items, d.buildBetResponse(snapshot))
 	}
@@ -1603,12 +1617,24 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
+		// 流局判定：amount/bet=0 且 盈亏(profit)=0（同时 payout 必为 0）。
+		// 禁止 amount=0 却带正赔付/非零盈亏。
+		isDrawRoundItem := betAmount.IsZero() && profit.IsZero() && payout.IsZero()
+		if betAmount.IsZero() && !isDrawRoundItem {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			return resp, nil
+		}
 		pump, pumpErr := parseMoney(item.Pump)
 		if pumpErr != nil || (mode == financeModeVoidRefund && !pump.IsZero()) {
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
 		if mode == financeModeVoidRefund && !payout.Equal(betAmount) {
+			resp.Code = services.ErrorCode_PARAMS_INVALID
+			return resp, nil
+		}
+		// 流局不允许带抽水。
+		if isDrawRoundItem && !pump.IsZero() {
 			resp.Code = services.ErrorCode_PARAMS_INVALID
 			return resp, nil
 		}
@@ -1710,6 +1736,7 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		account := dao.CacheIns().GetPlayerAccount(int64(req.Agent), int64(item.userID))
 		record := ConvertRecord(req.Agent, item.userID, req.Level, req.RoundId, item.currencyType, runtime.Symbol, account, item.record, newCurrency, runtime.WebID, true, item.betAmount.InexactFloat64(), item.payout.InexactFloat64(), item.pump.InexactFloat64())
 		d.SaveRecord(record)
+		isDrawRoundItem := item.betAmount.IsZero() && item.payout.IsZero() && item.profit.IsZero()
 		if item.payout.GreaterThan(decimal.Zero) {
 			desc := "settlement"
 			if mode == financeModeVoidRefund {
@@ -1722,6 +1749,9 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		if mode == financeModeVoidRefund {
 			revenueCNY := betCNY.Mul(runtime.Revenue).Truncate(4)
 			dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.userID, runtime.PoolSymbol, item.currencyType, req.RoundId, betCNY.Neg(), decimal.Zero, revenueCNY.Neg())
+		} else if isDrawRoundItem {
+			// 流局：只记注单（SaveRecord + 局数统计），不改奖池资金口径。
+			dao.CacheIns().RecordSettlement(int64(req.Agent), item.userID, runtime.PoolSymbol, decimal.Zero, decimal.Zero)
 		} else {
 			dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.userID, runtime.PoolSymbol, item.currencyType, req.RoundId, decimal.Zero, payoutCNY, decimal.Zero)
 			dao.CacheIns().RecordSettlement(int64(req.Agent), item.userID, runtime.PoolSymbol, betCNY, payoutCNY)
@@ -2097,7 +2127,8 @@ func (d *LotteryService) applyCancelBetLocked(
 			continue
 		}
 		amount, parseErr := decimal.NewFromString(item.Amount)
-		if parseErr != nil || !amount.GreaterThan(decimal.Zero) {
+		// 允许 amount=0 的流局注单参与取消/对账；仅解析失败才拒绝。
+		if parseErr != nil || amount.IsNegative() {
 			resp.Code = services.ErrorCode_SYSTEM_ERROR
 			resp.Reason = "INVALID_BET_AMOUNT"
 			return resp
