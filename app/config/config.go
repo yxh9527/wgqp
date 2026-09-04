@@ -175,7 +175,7 @@ func (cfg *Configs) SetAgentPool(agentId string, cm *Pool) {
 	cfg.Lock.Lock()
 	defer cfg.Lock.Unlock()
 
-	cfg.Pool.Agent[fmt.Sprintf("%s-%s", agentId, cm.Symbol)] = cm
+	cfg.Pool.Agent[fmt.Sprintf("%s_%s", agentId, cm.Symbol)] = cm
 }
 
 func (cfg *Configs) SetCurrency(cm *CurrencyMgr) {
@@ -218,13 +218,20 @@ func (cfg *Configs) GetAutoCtrl(effectBet, profitLoss decimal.Decimal) *AutoCtrl
 }
 
 func (cfg *Configs) GetPoolCfg(agentId int64, symbol string) *Pool {
+	p, _ := cfg.GetPoolCfgWithKey(agentId, symbol)
+	return p
+}
+
+// GetPoolCfgWithKey 返回最终使用的奖池配置及其 Redis 配置键。
+func (cfg *Configs) GetPoolCfgWithKey(agentId int64, symbol string) (*Pool, string) {
 	cfg.Lock.RLock()
 	defer cfg.Lock.RUnlock()
+
 	p := cfg.Pool.Agent[fmt.Sprintf("%d_%s", agentId, symbol)]
-	if p == nil {
-		return cfg.Pool.Default[symbol]
+	if p != nil {
+		return p, fmt.Sprintf("/agent/%d/pool/%s", agentId, symbol)
 	}
-	return p
+	return cfg.Pool.Default[symbol], fmt.Sprintf("/config/pool/%s", symbol)
 }
 
 // GetPoolItem 按游戏 symbol + 房间 level 取对应水位配置；level 不存在时返回 nil。

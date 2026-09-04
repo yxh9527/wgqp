@@ -933,13 +933,14 @@ func (d *LotteryService) canAffordRoundNetPayout(
 	if !netAward.IsPositive() {
 		return true
 	}
-	poolCfg := config.CfgIns.GetPoolCfg(int64(agentID), runtime.Symbol)
+	poolCfg, configKey := config.CfgIns.GetPoolCfgWithKey(int64(agentID), runtime.Symbol)
 	item := config.CfgIns.GetPoolItem(int64(agentID), runtime.Symbol, runtime.Level)
 	zap.L().Debug("canAffordRoundNetPayout:使用水池配置",
 		zap.Uint32("agentId", agentID),
 		zap.Uint32("userId", userID),
 		zap.Uint32("gameId", runtime.GameID),
 		zap.String("symbol", runtime.Symbol),
+		zap.String("configKey", configKey),
 		zap.String("poolSymbol", runtime.PoolSymbol),
 		zap.Uint32("level", runtime.Level),
 		zap.String("netAward", netAward.String()),
@@ -964,10 +965,24 @@ func (d *LotteryService) resolveRuntime(agentID, gameID, level uint32) (*roundRu
 	if game.IsFrozen == 1 {
 		return nil, services.ErrorCode_GAME_FROZEN
 	}
-	poolItem := config.CfgIns.GetPoolItem(int64(agentID), game.ConfName, level)
+	poolCfg, configKey := config.CfgIns.GetPoolCfgWithKey(int64(agentID), game.ConfName)
+	if poolCfg == nil || poolCfg.Pool == nil {
+		return nil, services.ErrorCode_SYSTEM_ERROR
+	}
+	poolItem := poolCfg.Pool[int32(level)]
 	if poolItem == nil {
 		return nil, services.ErrorCode_SYSTEM_ERROR
 	}
+	zap.L().Info("resolveRuntime:使用水池配置",
+		zap.Uint32("agentId", agentID),
+		zap.Uint32("gameId", gameID),
+		zap.String("symbol", game.ConfName),
+		zap.String("configKey", configKey),
+		zap.Uint32("level", level),
+		zap.String("poolSymbol", buildPoolSymbol(game.ConfName, level)),
+		zap.Any("poolConfig", poolCfg),
+		zap.Any("poolItem", poolItem),
+	)
 	return &roundRuntime{
 		AgentID:    agentID,
 		GameID:     gameID,

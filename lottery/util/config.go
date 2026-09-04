@@ -38,8 +38,11 @@ func ParseConfig(key string, value string) {
 			case "pool":
 				tmp := &config.Pool{}
 				if err := jsoniter.UnmarshalFromString(value, tmp); err == nil {
-					zap.L().Debug("加载pool配置文件成功", zap.Any("data", tmp))
 					config.CfgIns.SetDefaultPool(arr[3], tmp)
+					zap.L().Info("加载pool配置文件成功",
+						zap.String("configKey", key),
+						zap.Any("data", tmp),
+					)
 				} else {
 					zap.L().Error("加载pool配置失败", zap.Any("err", err))
 				}
@@ -69,6 +72,10 @@ func ParseConfig(key string, value string) {
 				tmp := &config.Pool{}
 				if err := jsoniter.UnmarshalFromString(value, tmp); err == nil {
 					config.CfgIns.SetAgentPool(arr[2], tmp)
+					zap.L().Info("加载代理pool配置文件成功",
+						zap.String("configKey", key),
+						zap.Any("data", tmp),
+					)
 				} else {
 					zap.L().Error("加载代理pool配置失败", zap.Any("err", err))
 				}
