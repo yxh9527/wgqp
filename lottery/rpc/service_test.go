@@ -9,6 +9,114 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+func TestIsRoundArchivableRetention(t *testing.T) {
+	svc := &LotteryService{}
+	now := int64(1_700_000_000)
+
+	settledFresh := &financeRound{
+		State: string(financeStateSettled),
+		Settlement: &financeSettlement{
+			Status:      financeSettlementStatusCompleted,
+			CompletedAt: now - 3600,
+		},
+	}
+	if svc.isRoundArchivable(settledFresh, now) {
+		t.Fatal("settled within 7d must not archive")
+	}
+
+	settledOld := &financeRound{
+		State: string(financeStateSettled),
+		Settlement: &financeSettlement{
+			Status:      financeSettlementStatusCompleted,
+			CompletedAt: now - financeRoundRetainSettledSeconds - 1,
+		},
+	}
+	if !svc.isRoundArchivable(settledOld, now) {
+		t.Fatal("settled beyond 7d must archive")
+	}
+
+	claimed := &financeRound{
+		State: string(financeStateSettled),
+		Settlement: &financeSettlement{
+			Status:      financeSettlementStatusClaimed,
+			CompletedAt: now - financeRoundRetainSettledSeconds - 1,
+		},
+	}
+	if svc.isRoundArchivable(claimed, now) {
+		t.Fatal("CLAIMED settlement must not archive")
+	}
+
+	expiredOld := &financeRound{
+		State: string(financeStateExpired),
+		Reservation: &financeReservation{
+			ExpiresAt: now - financeRoundRetainExpiredSeconds - 1,
+		},
+	}
+	if !svc.isRoundArchivable(expiredOld, now) {
+		t.Fatal("expired beyond 30d must archive")
+	}
+
+	reserved := &financeRound{State: string(financeStateReserved), UpdatedAt: now - financeRoundRetainExpiredSeconds*2}
+	if svc.isRoundArchivable(reserved, now) {
+		t.Fatal("RESERVED must never archive")
+	}
+}
+
+func TestArchiveStaleRoundsRemovesFromMemory(t *testing.T) {
+	svc := &LotteryService{
+		roundLock:               &sync.RWMutex{},
+		rounds:                  map[string]*financeRound{},
+		testSkipPoolSideEffects: true,
+	}
+	now := int64(1_700_000_000)
+	old := &financeRound{
+		RoundID: "old-settled",
+		State:   string(financeStateSettled),
+		Settlement: &financeSettlement{
+			Status:      financeSettlementStatusCompleted,
+			CompletedAt: now - financeRoundRetainSettledSeconds - 10,
+		},
+	}
+	fresh := &financeRound{
+		RoundID: "fresh-settled",
+		State:   string(financeStateSettled),
+		Settlement: &financeSettlement{
+			Status:      financeSettlementStatusCompleted,
+			CompletedAt: now - 10,
+		},
+	}
+	svc.rounds[old.RoundID] = old
+	svc.rounds[fresh.RoundID] = fresh
+	n := svc.archiveStaleRoundsLocked(now, 10)
+	if n != 1 {
+		t.Fatalf("archived count=%d", n)
+	}
+	if _, ok := svc.rounds["old-settled"]; ok {
+		t.Fatal("old round should be removed from memory")
+	}
+	if _, ok := svc.rounds["fresh-settled"]; !ok {
+		t.Fatal("fresh round must remain")
+	}
+}
+
+func TestCreditSettlementWalletAtomicIdempotent(t *testing.T) {
+	balances := map[uint32]int64{42: 10000}
+	svc := newCancelTestService(balances)
+	testSettleWalletMarkers = sync.Map{}
+
+	first, done, code := svc.creditSettlementWalletAtomic(42, 250, "settle-x")
+	if code != services.ErrorCode_OK || done || first != 10250 {
+		t.Fatalf("first credit bal=%d done=%v code=%v", first, done, code)
+	}
+	second, done, code := svc.creditSettlementWalletAtomic(42, 250, "settle-x")
+	if code != services.ErrorCode_OK || !done || second != 10250 {
+		t.Fatalf("second credit bal=%d done=%v code=%v", second, done, code)
+	}
+	if balances[42] != 10250 {
+		t.Fatalf("balance mutated twice: %d", balances[42])
+	}
+}
+
 func TestParseMoneyCentPrecision(t *testing.T) {
 	value, err := parseMoney("1.230")
 	if err != nil {

@@ -106,7 +106,148 @@ else
 end
 return 1
 `)
+	// reserveWithLedgerScript：汇总 Q + 按 reservationId 建 ledger。
+	// KEYS[1]=agent_reserved_data KEYS[2]=lottery:reservation_ledger
+	// ARGV: poolMember, basePool, amount, reservationId, ledgerValue(ACTIVE|...)
+	// 返回：0 不足；1 新建成功；2 已是 ACTIVE（幂等，不加 Q）；3 已 RELEASED 拒绝复用。
+	reserveWithLedgerScript = redis.NewScript(`
+local reservationId = ARGV[4]
+local existing = redis.call("HGET", KEYS[2], reservationId)
+if existing then
+  local status = string.match(existing, "^([^|]+)")
+  if status == "ACTIVE" then
+    return 2
+  end
+  return 3
+end
+local current = tonumber(redis.call("ZSCORE", KEYS[1], ARGV[1]) or "0")
+local basePool = tonumber(ARGV[2])
+local requested = tonumber(ARGV[3])
+if basePool - current < requested then
+  return 0
+end
+redis.call("ZINCRBY", KEYS[1], requested, ARGV[1])
+redis.call("HSET", KEYS[2], reservationId, ARGV[5])
+return 1
+`)
+	// releaseWithLedgerScript：校验 reservationId ledger 后释放 Q。
+	// ARGV: poolMember, amount, reservationId, releaseId, releasedLedgerValue, allowMigrate(0/1), migrateLedgerBefore
+	// 返回：0 失败；1 本次新释放；2 已释放（幂等，不改 Q）。
+	releaseWithLedgerScript = redis.NewScript(`
+local reservationId = ARGV[3]
+local releaseId = ARGV[4]
+local existing = redis.call("HGET", KEYS[2], reservationId)
+if not existing then
+  if tonumber(ARGV[6]) ~= 1 then
+    return 0
+  end
+  -- 升级兼容：无 ledger 的旧预留，允许一次性补建并释放。
+  existing = ARGV[7]
+  redis.call("HSET", KEYS[2], reservationId, existing)
+end
+local status = string.match(existing, "^([^|]+)")
+if status == "RELEASED" then
+  return 2
+end
+if status ~= "ACTIVE" then
+  return 0
+end
+local current = tonumber(redis.call("ZSCORE", KEYS[1], ARGV[1]) or "0")
+local released = tonumber(ARGV[2])
+if current + 0.0000001 < released then
+  return 0
+end
+local updated = current - released
+if updated <= 0.0000001 then
+  redis.call("ZREM", KEYS[1], ARGV[1])
+else
+  redis.call("ZADD", KEYS[1], updated, ARGV[1])
+end
+redis.call("HSET", KEYS[2], reservationId, ARGV[5])
+return 1
+`)
+	// adjustReservationLedgerScript：LIABILITY_CAP 差额调整，保持 ACTIVE。
+	// ARGV: poolMember, basePool, reservationId, oldAmount, newAmount, activeLedgerValue
+	// 返回：0 失败；1 成功；2 ledger 缺失且不允许（由 Go 侧决定是否 migrate 后重试）。
+	adjustReservationLedgerScript = redis.NewScript(`
+local reservationId = ARGV[3]
+local existing = redis.call("HGET", KEYS[2], reservationId)
+if not existing then
+  return 2
+end
+local status = string.match(existing, "^([^|]+)")
+if status ~= "ACTIVE" then
+  return 0
+end
+local oldAmount = tonumber(ARGV[4])
+local newAmount = tonumber(ARGV[5])
+local delta = newAmount - oldAmount
+local current = tonumber(redis.call("ZSCORE", KEYS[1], ARGV[1]) or "0")
+if delta > 0 then
+  local basePool = tonumber(ARGV[2])
+  if basePool - current < delta then
+    return 0
+  end
+  redis.call("ZINCRBY", KEYS[1], delta, ARGV[1])
+elseif delta < 0 then
+  local released = -delta
+  if current + 0.0000001 < released then
+    return 0
+  end
+  local updated = current - released
+  if updated <= 0.0000001 then
+    redis.call("ZREM", KEYS[1], ARGV[1])
+  else
+    redis.call("ZADD", KEYS[1], updated, ARGV[1])
+  end
+end
+redis.call("HSET", KEYS[2], reservationId, ARGV[6])
+return 1
+`)
 )
+
+const (
+	reservationLedgerRedisKey = "lottery:reservation_ledger"
+	financeReconcileSetKey    = "lottery:finance_reconcile"
+	settleWalletMarkerPrefix  = "lottery:settle_wallet:"
+	SettleWalletMarkerTTLSec  = int32(7 * 24 * 3600)
+)
+
+// ReservationLedger 状态。
+const (
+	ReservationLedgerActive   = "ACTIVE"
+	ReservationLedgerReleased = "RELEASED"
+)
+
+// EncodeReservationLedger 使用 Lua 友好的管道分隔格式。
+// status|amount|releaseId|roundId|agent|poolSymbol|reason|updatedAt
+func EncodeReservationLedger(
+	status, amount, releaseID, roundID string,
+	agent int64,
+	poolSymbol, reason string,
+	updatedAt int64,
+) string {
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%d",
+		status, amount, releaseID, roundID, agent, poolSymbol, reason, updatedAt)
+}
+
+// ParseReservationLedgerStatus 解析 ledger value 的 status 字段。
+func ParseReservationLedgerStatus(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '|' {
+			return raw[:i]
+		}
+	}
+	return raw
+}
+
+// SettleWalletMarkerKey 结算入账幂等键。
+func SettleWalletMarkerKey(settlementID string, userID uint32) string {
+	return fmt.Sprintf("%s%s:%d", settleWalletMarkerPrefix, settlementID, userID)
+}
 
 type RedisDao struct {
 	cli redis.UniversalClient
@@ -114,6 +255,16 @@ type RedisDao struct {
 
 func RedisIns() *RedisDao {
 	return redisDao
+}
+
+// SetRedisDaoForTest 仅测试注入 Redis 客户端。
+func SetRedisDaoForTest(rd *RedisDao) {
+	redisDao = rd
+}
+
+// NewRedisDaoWithClient 仅测试：用已有客户端构造 RedisDao。
+func NewRedisDaoWithClient(cli redis.UniversalClient) *RedisDao {
+	return &RedisDao{cli: cli}
 }
 
 func NewRedisDao(hosts []string, user, pwd string) {
@@ -566,6 +717,7 @@ func (rd *RedisDao) TryReserveAgentPool(agentID int64, symbol string, basePool, 
 }
 
 // ReleaseAgentReserved 原子释放指定金额；当前预留不足时拒绝操作。
+// Deprecated: 新路径请用 ReleaseAgentReservedWithLedger，避免跨牌局误释放。
 func (rd *RedisDao) ReleaseAgentReserved(agentID int64, symbol string, amount decimal.Decimal) (bool, error) {
 	key := fmt.Sprintf("%d_%s", agentID, symbol)
 	result, err := releasePoolReservationScript.Run(
@@ -579,6 +731,264 @@ func (rd *RedisDao) ReleaseAgentReserved(agentID int64, symbol string, amount de
 		return false, err
 	}
 	return result == 1, nil
+}
+
+// ReserveWithLedgerResult 描述带 ledger 的预留结果。
+type ReserveWithLedgerResult struct {
+	// Ok 表示可用（新建或幂等命中 ACTIVE）。
+	Ok bool
+	// AlreadyActive 为 true 时未再次增加 Q。
+	AlreadyActive bool
+	// RejectedReleased 表示 reservationId 已 RELEASED，禁止复用。
+	RejectedReleased bool
+}
+
+// TryReserveAgentPoolWithLedger 在增加 Q 的同时写入 reservationId ledger。
+func (rd *RedisDao) TryReserveAgentPoolWithLedger(
+	agentID int64,
+	symbol string,
+	basePool, amount decimal.Decimal,
+	reservationID, roundID string,
+) (ReserveWithLedgerResult, error) {
+	if reservationID == "" {
+		return ReserveWithLedgerResult{}, fmt.Errorf("reservationId required")
+	}
+	key := fmt.Sprintf("%d_%s", agentID, symbol)
+	ledger := EncodeReservationLedger(
+		ReservationLedgerActive,
+		amount.String(),
+		"",
+		roundID,
+		agentID,
+		symbol,
+		"",
+		time.Now().Unix(),
+	)
+	code, err := reserveWithLedgerScript.Run(
+		context.Background(),
+		rd.cli,
+		[]string{"agent_reserved_data", reservationLedgerRedisKey},
+		key,
+		basePool.String(),
+		amount.String(),
+		reservationID,
+		ledger,
+	).Int64()
+	if err != nil {
+		return ReserveWithLedgerResult{}, err
+	}
+	switch code {
+	case 0:
+		return ReserveWithLedgerResult{Ok: false}, nil
+	case 1:
+		return ReserveWithLedgerResult{Ok: true}, nil
+	case 2:
+		return ReserveWithLedgerResult{Ok: true, AlreadyActive: true}, nil
+	case 3:
+		return ReserveWithLedgerResult{RejectedReleased: true}, nil
+	default:
+		return ReserveWithLedgerResult{}, fmt.Errorf("unknown reserveWithLedger status: %d", code)
+	}
+}
+
+// ReleaseWithLedgerResult 描述带 ledger 的释放结果。
+type ReleaseWithLedgerResult struct {
+	Ok              bool
+	AlreadyReleased bool
+}
+
+// ReleaseAgentReservedWithLedger 按 reservationId 幂等释放；已 RELEASED 不再扣 Q。
+// allowMigrate：ledger 缺失时补建 ACTIVE 再释放（兼容升级前旧预留）。
+func (rd *RedisDao) ReleaseAgentReservedWithLedger(
+	agentID int64,
+	symbol string,
+	amount decimal.Decimal,
+	reservationID, roundID, releaseID, reason string,
+	allowMigrate bool,
+) (ReleaseWithLedgerResult, error) {
+	if reservationID == "" {
+		return ReleaseWithLedgerResult{}, fmt.Errorf("reservationId required")
+	}
+	key := fmt.Sprintf("%d_%s", agentID, symbol)
+	now := time.Now().Unix()
+	releasedLedger := EncodeReservationLedger(
+		ReservationLedgerReleased,
+		amount.String(),
+		releaseID,
+		roundID,
+		agentID,
+		symbol,
+		reason,
+		now,
+	)
+	migrateLedger := EncodeReservationLedger(
+		ReservationLedgerActive,
+		amount.String(),
+		"",
+		roundID,
+		agentID,
+		symbol,
+		"",
+		now,
+	)
+	migrateFlag := 0
+	if allowMigrate {
+		migrateFlag = 1
+	}
+	code, err := releaseWithLedgerScript.Run(
+		context.Background(),
+		rd.cli,
+		[]string{"agent_reserved_data", reservationLedgerRedisKey},
+		key,
+		amount.String(),
+		reservationID,
+		releaseID,
+		releasedLedger,
+		migrateFlag,
+		migrateLedger,
+	).Int64()
+	if err != nil {
+		return ReleaseWithLedgerResult{}, err
+	}
+	switch code {
+	case 0:
+		return ReleaseWithLedgerResult{Ok: false}, nil
+	case 1:
+		return ReleaseWithLedgerResult{Ok: true}, nil
+	case 2:
+		return ReleaseWithLedgerResult{Ok: true, AlreadyReleased: true}, nil
+	default:
+		return ReleaseWithLedgerResult{}, fmt.Errorf("unknown releaseWithLedger status: %d", code)
+	}
+}
+
+// AdjustAgentReservedWithLedger 调整同一 reservationId 的占用额，保持 ACTIVE。
+func (rd *RedisDao) AdjustAgentReservedWithLedger(
+	agentID int64,
+	symbol string,
+	basePool, oldAmount, newAmount decimal.Decimal,
+	reservationID, roundID string,
+) (bool, error) {
+	if reservationID == "" {
+		return false, fmt.Errorf("reservationId required")
+	}
+	key := fmt.Sprintf("%d_%s", agentID, symbol)
+	ledger := EncodeReservationLedger(
+		ReservationLedgerActive,
+		newAmount.String(),
+		"",
+		roundID,
+		agentID,
+		symbol,
+		"",
+		time.Now().Unix(),
+	)
+	code, err := adjustReservationLedgerScript.Run(
+		context.Background(),
+		rd.cli,
+		[]string{"agent_reserved_data", reservationLedgerRedisKey},
+		key,
+		basePool.String(),
+		reservationID,
+		oldAmount.String(),
+		newAmount.String(),
+		ledger,
+	).Int64()
+	if err != nil {
+		return false, err
+	}
+	switch code {
+	case 1:
+		return true, nil
+	case 0, 2:
+		return false, nil
+	default:
+		return false, fmt.Errorf("unknown adjustReservationLedger status: %d", code)
+	}
+}
+
+// GetReservationLedgerRaw 读取 ledger 原文（测试/对账）。
+func (rd *RedisDao) GetReservationLedgerRaw(reservationID string) (string, error) {
+	val, err := rd.cli.HGet(context.Background(), reservationLedgerRedisKey, reservationID).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return val, err
+}
+
+// SeedReservationLedgerActive 仅写入 ACTIVE ledger，不改 Q（升级兼容：Q 已占用但无凭证）。
+// 若 field 已存在则不覆盖，返回 false。
+func (rd *RedisDao) SeedReservationLedgerActive(
+	agentID int64,
+	symbol string,
+	amount decimal.Decimal,
+	reservationID, roundID string,
+) error {
+	if reservationID == "" {
+		return fmt.Errorf("reservationId required")
+	}
+	ledger := EncodeReservationLedger(
+		ReservationLedgerActive,
+		amount.String(),
+		"",
+		roundID,
+		agentID,
+		symbol,
+		"",
+		time.Now().Unix(),
+	)
+	ok, err := rd.cli.HSetNX(context.Background(), reservationLedgerRedisKey, reservationID, ledger).Result()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// 已存在则视为成功（可能并发补建）。
+		return nil
+	}
+	return nil
+}
+
+// AddFinanceReconcileRound 将需要补偿落盘的 roundId 记入集合。
+func (rd *RedisDao) AddFinanceReconcileRound(roundID string) error {
+	if roundID == "" {
+		return nil
+	}
+	return rd.cli.SAdd(context.Background(), financeReconcileSetKey, roundID).Err()
+}
+
+// PopFinanceReconcileRounds 取出一批待补偿 roundId（非事务，允许重复）。
+func (rd *RedisDao) PopFinanceReconcileRounds(limit int64) ([]string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	ids, err := rd.cli.SRandMemberN(context.Background(), financeReconcileSetKey, limit).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	members := make([]interface{}, len(ids))
+	for i, id := range ids {
+		members[i] = id
+	}
+	_ = rd.cli.SRem(context.Background(), financeReconcileSetKey, members...).Err()
+	return ids, nil
+}
+
+// CreditPlayerCurrencyWithSettleMarker 结算入账幂等：同一 settlementId+userId 只加一次币。
+func (rd *RedisDao) CreditPlayerCurrencyWithSettleMarker(
+	playerID uint32,
+	currencyDelta int64,
+	settlementID string,
+) (CancelWalletRefundResult, error) {
+	return rd.RefundPlayerCurrencyWithCancelMarker(
+		playerID,
+		currencyDelta,
+		SettleWalletMarkerKey(settlementID, playerID),
+		settlementID,
+		SettleWalletMarkerTTLSec,
+	)
 }
 
 func (rd *RedisDao) HGet(key, attrKey string) (string, error) {

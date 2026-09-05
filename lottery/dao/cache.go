@@ -330,6 +330,7 @@ func (gcm *GameCacheMgr) ApplyPoolChange(
 }
 
 // TryReservePool 原子检查基础奖池并建立预留，返回 false 表示奖池不足或 Redis 操作失败。
+// Deprecated: 新路径请用 TryReservePoolWithLedger。
 func (gcm *GameCacheMgr) TryReservePool(agentID int64, symbol string, amount decimal.Decimal) (bool, error) {
 	agent := gcm.GetAgent(agentID)
 	agent.lock.Lock()
@@ -339,7 +340,25 @@ func (gcm *GameCacheMgr) TryReservePool(agentID int64, symbol string, amount dec
 	return RedisIns().TryReserveAgentPool(agentID, symbol, basePool, amount)
 }
 
+// TryReservePoolWithLedger 建立预留并写入 reservationId ledger。
+func (gcm *GameCacheMgr) TryReservePoolWithLedger(
+	agentID int64,
+	symbol string,
+	amount decimal.Decimal,
+	reservationID, roundID string,
+) (ReserveWithLedgerResult, error) {
+	agent := gcm.GetAgent(agentID)
+	agent.lock.Lock()
+	defer agent.lock.Unlock()
+
+	basePool := poolValue(agent.GetGame(symbol))
+	return RedisIns().TryReserveAgentPoolWithLedger(
+		agentID, symbol, basePool, amount, reservationID, roundID,
+	)
+}
+
 // ReleasePoolReservation 释放指定牌局占用的有效预留，重复释放会被 Redis 拒绝。
+// Deprecated: 新路径请用 ReleasePoolReservationWithLedger。
 func (gcm *GameCacheMgr) ReleasePoolReservation(agentID int64, symbol string, amount decimal.Decimal) bool {
 	released, err := RedisIns().ReleaseAgentReserved(agentID, symbol, amount)
 	if err != nil {
@@ -350,6 +369,72 @@ func (gcm *GameCacheMgr) ReleasePoolReservation(agentID int64, symbol string, am
 		zap.L().Error("奖池有效预留不足，拒绝重复释放", zap.Int64("agentId", agentID), zap.String("symbol", symbol), zap.String("amount", amount.String()))
 	}
 	return released
+}
+
+// ReleasePoolReservationWithLedger 按 reservationId 幂等释放预留。
+func (gcm *GameCacheMgr) ReleasePoolReservationWithLedger(
+	agentID int64,
+	symbol string,
+	amount decimal.Decimal,
+	reservationID, roundID, releaseID, reason string,
+	allowMigrate bool,
+) ReleaseWithLedgerResult {
+	result, err := RedisIns().ReleaseAgentReservedWithLedger(
+		agentID, symbol, amount, reservationID, roundID, releaseID, reason, allowMigrate,
+	)
+	if err != nil {
+		zap.L().Error("带 ledger 释放奖池预留失败",
+			zap.Int64("agentId", agentID),
+			zap.String("symbol", symbol),
+			zap.String("amount", amount.String()),
+			zap.String("reservationId", reservationID),
+			zap.String("releaseId", releaseID),
+			zap.Error(err),
+		)
+		return ReleaseWithLedgerResult{}
+	}
+	if !result.Ok {
+		zap.L().Error("带 ledger 释放奖池预留被拒绝",
+			zap.Int64("agentId", agentID),
+			zap.String("symbol", symbol),
+			zap.String("amount", amount.String()),
+			zap.String("reservationId", reservationID),
+			zap.String("releaseId", releaseID),
+		)
+	}
+	return result
+}
+
+// AdjustPoolReservationWithLedger 调整同一 reservationId 占用额（LIABILITY_CAP）。
+func (gcm *GameCacheMgr) AdjustPoolReservationWithLedger(
+	agentID int64,
+	symbol string,
+	oldAmount, newAmount decimal.Decimal,
+	reservationID, roundID string,
+) (bool, error) {
+	agent := gcm.GetAgent(agentID)
+	agent.lock.Lock()
+	defer agent.lock.Unlock()
+
+	basePool := poolValue(agent.GetGame(symbol))
+	ok, err := RedisIns().AdjustAgentReservedWithLedger(
+		agentID, symbol, basePool, oldAmount, newAmount, reservationID, roundID,
+	)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		return true, nil
+	}
+	// ledger 缺失：补建 ACTIVE（不改 Q，旧预留已在汇总里），再调一次。
+	if seedErr := RedisIns().SeedReservationLedgerActive(
+		agentID, symbol, oldAmount, reservationID, roundID,
+	); seedErr != nil {
+		return false, seedErr
+	}
+	return RedisIns().AdjustAgentReservedWithLedger(
+		agentID, symbol, basePool, oldAmount, newAmount, reservationID, roundID,
+	)
 }
 
 // RecordSettlement 更新打码量、玩家局数和玩家累计返奖，不重复修改代理奖池。

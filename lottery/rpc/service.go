@@ -30,8 +30,18 @@ import (
 const (
 	// financeRoundHash 保存全部牌局的资金状态快照。
 	financeRoundHash = "lottery_finance_rounds"
+	// financeRoundArchiveHash 终态局冷归档，避免热 HASH/内存无限增长。
+	financeRoundArchiveHash = "lottery_finance_rounds_archive"
+	// SETTLED/VOIDED 保留 7 天供幂等重试与对账。
+	financeRoundRetainSettledSeconds int64 = 7 * 24 * 3600
+	// EXPIRED 保留 30 天：可能仍需人工 VOID_REFUND。
+	financeRoundRetainExpiredSeconds int64 = 30 * 24 * 3600
+	// 每次清理最多归档条数，避免持锁过久。
+	financeRoundArchiveBatch = 100
 	// 未指定预留时长时，默认锁定奖池 300 秒。
 	defaultReservationTimeoutSeconds = 300
+	// 续期默认从 now 起再保 60 秒（房间心跳每 10s 调一次）。
+	defaultReservationExtendSeconds = 60
 	financeModeNormal                = "NORMAL"
 	financeModeVoidRefund            = "VOID_REFUND"
 	// reservationModeLiabilityCap 为单人房发牌前责任上限预留：
@@ -121,6 +131,10 @@ type financeReservation struct {
 	Status         string `json:"status"`
 	// Mode 为空表示精确结果预留；LIABILITY_CAP 表示责任上限预留。
 	Mode string `json:"mode,omitempty"`
+	// ReleasePending：Q 已释放但 round 落盘失败，等待补偿。
+	ReleasePending bool   `json:"releasePending,omitempty"`
+	ReleaseID      string `json:"releaseId,omitempty"`
+	ReleaseReason  string `json:"releaseReason,omitempty"`
 }
 
 type financeSettlementResult struct {
@@ -129,6 +143,14 @@ type financeSettlementResult struct {
 	Currency string `json:"currency,omitempty"`
 	Message  string `json:"message,omitempty"`
 }
+
+const (
+	financeSettlementStatusClaimed   = "CLAIMED"
+	financeSettlementStatusCompleted = "COMPLETED"
+	reservationReleaseReasonSettle   = "SETTLE"
+	reservationReleaseReasonExpire   = "EXPIRE"
+	reservationReleaseReasonAdjust   = "ADJUST"
+)
 
 // financeSettlement 固化最终结算结果，保证 settlementId 重试不会重复入账。
 type financeSettlement struct {
@@ -139,6 +161,12 @@ type financeSettlement struct {
 	Mode         string                     `json:"mode"`
 	Results      []*financeSettlementResult `json:"results"`
 	CompletedAt  int64                      `json:"completedAt"`
+	// Status：CLAIMED=已持久化待入账/入账中；COMPLETED=全部完成。旧数据空视为 COMPLETED。
+	Status string `json:"status,omitempty"`
+	// PoolApplied：奖池统计是否已写入（防 CLAIMED 重试重复 ApplyPoolChange）。
+	PoolApplied bool `json:"poolApplied,omitempty"`
+	// ReleaseDone：本局预留是否已按 settlementId 释放。
+	ReleaseDone bool `json:"releaseDone,omitempty"`
 }
 
 // financeRound 是一个 roundId 的完整资金状态机快照。
@@ -359,7 +387,7 @@ func NewLotteryService(es *elastic.Client) *LotteryService {
 	return service
 }
 
-// startRoundExpirationLoop 定期把超时预留从 RESERVED 原子推进到 EXPIRED。
+// startRoundExpirationLoop 定期把超时预留从 RESERVED 原子推进到 EXPIRED，并 drain 补偿队列。
 func (d *LotteryService) startRoundExpirationLoop() {
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -369,12 +397,15 @@ func (d *LotteryService) startRoundExpirationLoop() {
 			for _, round := range d.rounds {
 				d.expireRoundIfNeededLocked(round)
 			}
+			d.archiveStaleRoundsLocked(time.Now().Unix(), financeRoundArchiveBatch)
 			d.roundLock.Unlock()
+			d.drainFinanceReconcile()
 		}
 	}()
 }
 
 // loadRoundStates 在服务启动时恢复牌局，支持热更新和实例迁移后的状态查询。
+// 已超过保留期的终态局直接冷归档，不进入热内存。
 func (d *LotteryService) loadRoundStates() {
 	if d.rds == nil {
 		return
@@ -384,6 +415,8 @@ func (d *LotteryService) loadRoundStates() {
 		zap.L().Error("load finance rounds failed", zap.Error(err))
 		return
 	}
+	now := time.Now().Unix()
+	archived := 0
 	d.roundLock.Lock()
 	defer d.roundLock.Unlock()
 	for roundID, raw := range data {
@@ -395,7 +428,26 @@ func (d *LotteryService) loadRoundStates() {
 		if round.Bets == nil {
 			round.Bets = make(map[string]*financeBetSnapshot)
 		}
+		if round.CancelRequests == nil {
+			round.CancelRequests = make(map[string]*financeCancelRequest)
+		}
+		if round.EffectCancels == nil {
+			round.EffectCancels = make(map[string]*financeEffectCancel)
+		}
+		if d.isRoundArchivable(round, now) {
+			if err := d.archiveRoundLocked(round, raw); err != nil {
+				zap.L().Error("startup archive finance round failed",
+					zap.String("roundId", roundID), zap.Error(err))
+				d.rounds[round.RoundID] = round
+				continue
+			}
+			archived++
+			continue
+		}
 		d.rounds[round.RoundID] = round
+	}
+	if archived > 0 {
+		zap.L().Info("startup archived stale finance rounds", zap.Int("count", archived))
 	}
 }
 
@@ -823,6 +875,7 @@ func (d *LotteryService) loadRoundLocked(roundID string) (*financeRound, bool) {
 
 // saveRoundLocked 同步更新内存和 Redis 中的牌局资金快照。调用方必须持有 roundLock。
 // 返回 error 时调用方必须视持久化为失败（CancelBet 不得在失败后仍返回成功）。
+// 已过保留期的终态局改为冷归档，避免回写热 HASH 复活旧数据。
 func (d *LotteryService) saveRoundLocked(round *financeRound) error {
 	if round.Bets == nil {
 		round.Bets = make(map[string]*financeBetSnapshot)
@@ -834,12 +887,15 @@ func (d *LotteryService) saveRoundLocked(round *financeRound) error {
 		round.EffectCancels = make(map[string]*financeEffectCancel)
 	}
 	round.UpdatedAt = time.Now().Unix()
-	d.rounds[round.RoundID] = round
 	raw, err := jsoniter.MarshalToString(round)
 	if err != nil {
 		zap.L().Error("encode finance round failed", zap.String("roundId", round.RoundID), zap.Error(err))
 		return err
 	}
+	if d.isRoundArchivable(round, round.UpdatedAt) {
+		return d.archiveRoundLocked(round, raw)
+	}
+	d.rounds[round.RoundID] = round
 	if d.rds == nil {
 		return nil
 	}
@@ -866,13 +922,191 @@ func (d *LotteryService) expireRoundIfNeededLocked(round *financeRound) bool {
 		zap.L().Error("解析过期预留金额失败", zap.String("roundId", round.RoundID), zap.Error(err))
 		return false
 	}
-	if !dao.CacheIns().ReleasePoolReservation(int64(round.Agent), round.PoolSymbol, amount) {
+	if d.testSkipPoolSideEffects {
+		round.Reservation.Status = string(financeStateExpired)
+		round.State = string(financeStateExpired)
+		_ = d.saveRoundLocked(round)
+		return true
+	}
+	releaseID := fmt.Sprintf("expire:%s:%s", round.RoundID, round.Reservation.ReservationID)
+	released := dao.CacheIns().ReleasePoolReservationWithLedger(
+		int64(round.Agent),
+		round.PoolSymbol,
+		amount,
+		round.Reservation.ReservationID,
+		round.RoundID,
+		releaseID,
+		reservationReleaseReasonExpire,
+		true,
+	)
+	if !released.Ok {
 		return false
 	}
 	round.Reservation.Status = string(financeStateExpired)
+	round.Reservation.ReleaseID = releaseID
+	round.Reservation.ReleaseReason = reservationReleaseReasonExpire
+	round.Reservation.ReleasePending = false
 	round.State = string(financeStateExpired)
-	d.saveRoundLocked(round)
+	if err := d.saveRoundLocked(round); err != nil {
+		round.Reservation.ReleasePending = true
+		d.enqueueFinanceReconcile(round.RoundID)
+		zap.L().Error("过期释放后落盘失败，已入补偿队列",
+			zap.String("roundId", round.RoundID),
+			zap.String("reservationId", round.Reservation.ReservationID),
+			zap.Error(err),
+		)
+	}
 	return true
+}
+
+func (d *LotteryService) enqueueFinanceReconcile(roundID string) {
+	if roundID == "" || d.rds == nil {
+		return
+	}
+	if err := d.rds.AddFinanceReconcileRound(roundID); err != nil {
+		zap.L().Error("enqueue finance reconcile failed", zap.String("roundId", roundID), zap.Error(err))
+	}
+}
+
+// drainFinanceReconcile 重试落盘失败的 round 快照。
+func (d *LotteryService) drainFinanceReconcile() {
+	if d.rds == nil {
+		return
+	}
+	ids, err := d.rds.PopFinanceReconcileRounds(50)
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	d.roundLock.Lock()
+	defer d.roundLock.Unlock()
+	for _, roundID := range ids {
+		round, ok := d.rounds[roundID]
+		if !ok {
+			continue
+		}
+		if err := d.saveRoundLocked(round); err != nil {
+			d.enqueueFinanceReconcile(roundID)
+			continue
+		}
+		if round.Reservation != nil {
+			round.Reservation.ReleasePending = false
+			_ = d.saveRoundLocked(round)
+		}
+	}
+}
+
+// roundTerminalAt 终态参考时间。
+// SETTLED/VOIDED：Settlement.CompletedAt；EXPIRED：预留 ExpiresAt（避免 save 刷新 UpdatedAt 导致永不归档）。
+func roundTerminalAt(round *financeRound) int64 {
+	if round == nil {
+		return 0
+	}
+	switch round.State {
+	case string(financeStateSettled), string(financeStateVoided):
+		if round.Settlement != nil && round.Settlement.CompletedAt > 0 {
+			return round.Settlement.CompletedAt
+		}
+	case string(financeStateExpired):
+		if round.Reservation != nil && round.Reservation.ExpiresAt > 0 {
+			return round.Reservation.ExpiresAt
+		}
+	}
+	return round.UpdatedAt
+}
+
+// isRoundArchivable 判断终态局是否已过保留期且无未完成资金中间态。
+func (d *LotteryService) isRoundArchivable(round *financeRound, now int64) bool {
+	if round == nil || now <= 0 {
+		return false
+	}
+	if round.Reservation != nil && round.Reservation.ReleasePending {
+		return false
+	}
+	if round.Settlement != nil && round.Settlement.Status == financeSettlementStatusClaimed {
+		return false
+	}
+	ref := roundTerminalAt(round)
+	if ref <= 0 {
+		return false
+	}
+	age := now - ref
+	switch round.State {
+	case string(financeStateSettled), string(financeStateVoided):
+		return age >= financeRoundRetainSettledSeconds
+	case string(financeStateExpired):
+		return age >= financeRoundRetainExpiredSeconds
+	default:
+		return false
+	}
+}
+
+// archiveRoundLocked 将终态局写入冷归档并从热 HASH/内存移除。调用方持 roundLock。
+func (d *LotteryService) archiveRoundLocked(round *financeRound, raw string) error {
+	if round == nil || round.RoundID == "" {
+		return nil
+	}
+	if raw == "" {
+		encoded, err := jsoniter.MarshalToString(round)
+		if err != nil {
+			return err
+		}
+		raw = encoded
+	}
+	if d.rds != nil {
+		if err := d.rds.HSet(financeRoundArchiveHash, raw, round.RoundID); err != nil {
+			return err
+		}
+		if err := d.rds.HDel(financeRoundHash, round.RoundID); err != nil {
+			zap.L().Error("archive: delete live finance round failed",
+				zap.String("roundId", round.RoundID), zap.Error(err))
+			return err
+		}
+	}
+	delete(d.rounds, round.RoundID)
+	return nil
+}
+
+// archiveStaleRoundsLocked 扫描热内存中的过期终态局并归档。
+func (d *LotteryService) archiveStaleRoundsLocked(now int64, limit int) int {
+	if limit <= 0 {
+		limit = financeRoundArchiveBatch
+	}
+	n := 0
+	for _, round := range d.rounds {
+		if n >= limit {
+			break
+		}
+		if !d.isRoundArchivable(round, now) {
+			continue
+		}
+		if err := d.archiveRoundLocked(round, ""); err != nil {
+			zap.L().Error("archive stale finance round failed",
+				zap.String("roundId", round.RoundID), zap.Error(err))
+			continue
+		}
+		n++
+	}
+	if n > 0 {
+		zap.L().Info("archived stale finance rounds", zap.Int("count", n))
+	}
+	return n
+}
+
+// loadArchivedRound 只读冷归档，不回填热内存。
+func (d *LotteryService) loadArchivedRound(roundID string) (*financeRound, bool) {
+	if d.rds == nil || roundID == "" {
+		return nil, false
+	}
+	raw, err := d.rds.HGet(financeRoundArchiveHash, roundID)
+	if err != nil || raw == "" {
+		return nil, false
+	}
+	round := &financeRound{}
+	if err := jsoniter.UnmarshalFromString(raw, round); err != nil {
+		zap.L().Error("decode archived finance round failed", zap.String("roundId", roundID), zap.Error(err))
+		return nil, false
+	}
+	return round, true
 }
 
 // roundBetDigest 对排序后的全部 ACTIVE 下注计算 SHA-256，锁定结算使用的订单集合。
@@ -1383,23 +1617,23 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 			resp.Reason = "RESERVATION_PERSIST_FAILED"
 			return resp, nil
 		}
-		delta := totalPayoutCNY.Sub(oldAmount)
-		if delta.IsPositive() {
-			reserved, reserveErr := dao.CacheIns().TryReservePool(int64(req.Agent), runtime.PoolSymbol, delta)
-			if reserveErr != nil {
+		if !totalPayoutCNY.Equal(oldAmount) {
+			adjusted, adjustErr := dao.CacheIns().AdjustPoolReservationWithLedger(
+				int64(req.Agent),
+				runtime.PoolSymbol,
+				oldAmount,
+				totalPayoutCNY,
+				round.Reservation.ReservationID,
+				req.RoundId,
+			)
+			if adjustErr != nil {
 				resp.Code = services.ErrorCode_SYSTEM_ERROR
 				resp.Reason = "RESERVATION_PERSIST_FAILED"
 				return resp, nil
 			}
-			if !reserved {
+			if !adjusted {
 				resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
 				resp.Reason = "INSUFFICIENT_POOL"
-				return resp, nil
-			}
-		} else if delta.IsNegative() {
-			if !dao.CacheIns().ReleasePoolReservation(int64(req.Agent), runtime.PoolSymbol, delta.Abs()) {
-				resp.Code = services.ErrorCode_SYSTEM_ERROR
-				resp.Reason = "RESERVATION_PERSIST_FAILED"
 				return resp, nil
 			}
 		}
@@ -1430,26 +1664,38 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 		return resp, nil
 	}
 
-	// Redis Lua 在一次操作中检查基础奖池、扣除已有预留并建立本次预留。
-	reserved, reserveErr := dao.CacheIns().TryReservePool(int64(req.Agent), runtime.PoolSymbol, totalPayoutCNY)
+	timeoutSeconds := req.TimeoutSeconds
+	if timeoutSeconds == 0 {
+		timeoutSeconds = defaultReservationTimeoutSeconds
+	}
+	reservationID := fmt.Sprintf("%s-%d", req.RoundId, time.Now().UnixNano())
+	// Redis Lua：检查基础奖池并建立预留 + reservationId ledger。
+	reserved, reserveErr := dao.CacheIns().TryReservePoolWithLedger(
+		int64(req.Agent),
+		runtime.PoolSymbol,
+		totalPayoutCNY,
+		reservationID,
+		req.RoundId,
+	)
 	if reserveErr != nil {
 		resp.Code = services.ErrorCode_SYSTEM_ERROR
 		resp.Reason = "RESERVATION_PERSIST_FAILED"
 		return resp, nil
 	}
-	if !reserved {
+	if reserved.RejectedReleased {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "ROUND_CONFLICT"
+		return resp, nil
+	}
+	if !reserved.Ok {
 		resp.Code = services.ErrorCode_NO_ENOUGH_POOL_MONEY
 		resp.Reason = "INSUFFICIENT_POOL"
 		return resp, nil
 	}
 
-	timeoutSeconds := req.TimeoutSeconds
-	if timeoutSeconds == 0 {
-		timeoutSeconds = defaultReservationTimeoutSeconds
-	}
 	round.Reservation = &financeReservation{
 		RequestID:      req.RequestId,
-		ReservationID:  fmt.Sprintf("%s-%d", req.RoundId, time.Now().UnixNano()),
+		ReservationID:  reservationID,
 		BetDigest:      digest,
 		OutcomeHash:    req.OutcomeHash,
 		TotalPayoutCNY: decimalString(totalPayoutCNY),
@@ -1465,6 +1711,124 @@ func (d *LotteryService) PrePay(_ context.Context, req *services.PrePayRequest) 
 	resp.ReservationId = round.Reservation.ReservationID
 	resp.ExpiresAt = round.Reservation.ExpiresAt
 	resp.ReservationMode = round.Reservation.Mode
+	return resp, nil
+}
+
+// RenewReservation 仅延长 RESERVED 预留的 expiresAt。
+// 不改预留金额、outcomeHash、betDigest，不调整奖池占用。
+// 超时仍由 expireRoundIfNeededLocked：回退水池（预扣归零）并标记 EXPIRED。
+func (d *LotteryService) RenewReservation(_ context.Context, req *services.RenewReservationRequest) (resp *services.RenewReservationResponse, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			zap.L().Error("RenewReservation panic", zap.Any("err", rec))
+			resp = &services.RenewReservationResponse{Code: services.ErrorCode_SYSTEM_ERROR}
+			err = nil
+		}
+	}()
+
+	resp = &services.RenewReservationResponse{
+		Code:    services.ErrorCode_OK,
+		RoundId: req.RoundId,
+		State:   string(financeStateBetting),
+	}
+	if req.RequestId == "" || req.RoundId == "" || req.GameId == 0 || req.ReservationId == "" {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "INVALID_REQUEST"
+		return resp, nil
+	}
+
+	runtime, code := d.resolveRuntime(req.Agent, req.GameId, req.Level)
+	if code != services.ErrorCode_OK {
+		resp.Code = code
+		resp.Reason = "INVALID_REQUEST"
+		return resp, nil
+	}
+
+	d.roundLock.Lock()
+	defer d.roundLock.Unlock()
+
+	round, ok := d.loadRoundLocked(req.RoundId)
+	if !ok {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "INVALID_REQUEST"
+		return resp, nil
+	}
+	if code := d.validateRound(round, runtime); code != services.ErrorCode_OK {
+		resp.Code = code
+		resp.Reason = "INVALID_REQUEST"
+		return resp, nil
+	}
+
+	// 先推进过期：超时预扣回退水池并清 RESERVED。
+	d.expireRoundIfNeededLocked(round)
+	resp.State = d.roundStateCode(round)
+	resp.BetDigest = d.roundBetDigest(round)
+
+	if round.State == string(financeStateExpired) {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "EXPIRED"
+		return resp, nil
+	}
+	if round.State == string(financeStateSettled) || round.State == string(financeStateVoided) {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "ROUND_CONFLICT"
+		return resp, nil
+	}
+	if round.Reservation == nil ||
+		round.Reservation.Status != string(financeStateReserved) ||
+		round.State != string(financeStateReserved) {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "NOT_RESERVED"
+		return resp, nil
+	}
+	if round.Reservation.ReservationID != req.ReservationId {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "ROUND_CONFLICT"
+		resp.ReservationId = round.Reservation.ReservationID
+		resp.ExpiresAt = round.Reservation.ExpiresAt
+		resp.OutcomeHash = round.Reservation.OutcomeHash
+		resp.ReservationMode = round.Reservation.Mode
+		return resp, nil
+	}
+	if req.BetDigest != "" && req.BetDigest != round.Reservation.BetDigest {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "BET_MISMATCH"
+		resp.ReservationId = round.Reservation.ReservationID
+		resp.ExpiresAt = round.Reservation.ExpiresAt
+		resp.OutcomeHash = round.Reservation.OutcomeHash
+		resp.ReservationMode = round.Reservation.Mode
+		return resp, nil
+	}
+	if req.OutcomeHash != "" && req.OutcomeHash != round.Reservation.OutcomeHash {
+		resp.Code = services.ErrorCode_PARAMS_INVALID
+		resp.Reason = "ROUND_CONFLICT"
+		resp.ReservationId = round.Reservation.ReservationID
+		resp.ExpiresAt = round.Reservation.ExpiresAt
+		resp.OutcomeHash = round.Reservation.OutcomeHash
+		resp.ReservationMode = round.Reservation.Mode
+		return resp, nil
+	}
+
+	extendSeconds := req.ExtendSeconds
+	if extendSeconds == 0 {
+		extendSeconds = defaultReservationExtendSeconds
+	}
+	candidate := time.Now().Add(time.Duration(extendSeconds) * time.Second).Unix()
+	if round.Reservation.ExpiresAt > candidate {
+		candidate = round.Reservation.ExpiresAt
+	}
+	round.Reservation.ExpiresAt = candidate
+	round.Reservation.RequestID = req.RequestId
+	d.saveRoundLocked(round)
+
+	resp.Success = true
+	resp.State = round.State
+	resp.ReservationId = round.Reservation.ReservationID
+	resp.ExpiresAt = round.Reservation.ExpiresAt
+	resp.BetDigest = round.Reservation.BetDigest
+	resp.OutcomeHash = round.Reservation.OutcomeHash
+	resp.ReservationMode = round.Reservation.Mode
+	resp.Reason = ""
 	return resp, nil
 }
 
@@ -1526,12 +1890,19 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 	}
 	d.expireRoundIfNeededLocked(round)
 
+	resumingSettlementClaim := false
 	if round.Settlement != nil && round.Settlement.SettlementID == req.SettlementId {
-		resp.State = round.State
-		for _, item := range round.Settlement.Results {
-			resp.Items = append(resp.Items, d.buildSettlementResponse(item))
+		status := round.Settlement.Status
+		if status == "" || status == financeSettlementStatusCompleted {
+			resp.State = round.State
+			for _, item := range round.Settlement.Results {
+				resp.Items = append(resp.Items, d.buildSettlementResponse(item))
+			}
+			return resp, nil
 		}
-		return resp, nil
+		if status == financeSettlementStatusClaimed {
+			resumingSettlementClaim = true
+		}
 	}
 	if gateOK, reason := d.ensureNoPendingCancelClaimsLocked(round, runtime); !gateOK {
 		resp.Code = services.ErrorCode_PARAMS_INVALID
@@ -1739,23 +2110,41 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		currentCurrencys[item.userID] = current
 	}
 
-	// 所有请求项校验完成后才批量入账，校验失败不会产生部分赔付。
-	newCurrencys := make(map[uint32]int64, len(deltas))
-	if len(deltas) > 0 {
-		tmp, batchErr := d.rds.BatchUpdatePlayerCurrencys(deltas)
-		if batchErr != nil {
-			zap.L().Error("batch settlement balance update failed", zap.Error(batchErr))
-			resp.Code = services.ErrorCode_SYSTEM_ERROR
-			return resp, nil
+	// CLAIM：先落盘中间态，再动钱包（对齐 CancelBet）。
+	var settlementClaim *financeSettlement
+	if resumingSettlementClaim {
+		settlementClaim = round.Settlement
+	} else {
+		settlementClaim = &financeSettlement{
+			SettlementID: req.SettlementId,
+			Reservation:  req.ReservationId,
+			BetDigest:    digest,
+			OutcomeHash:  req.OutcomeHash,
+			Mode:         mode,
+			Status:       financeSettlementStatusClaimed,
+			Results:      nil,
 		}
-		newCurrencys = tmp
-		if len(newCurrencys) != len(deltas) {
+		round.Settlement = settlementClaim
+		if err := d.saveRoundLocked(round); err != nil {
+			round.Settlement = nil
 			resp.Code = services.ErrorCode_SYSTEM_ERROR
 			return resp, nil
 		}
 	}
 
+	// 按 settlementId+userId 幂等入账，禁止裸 HIncrBy 重试双发。
+	newCurrencys := make(map[uint32]int64, len(deltas))
+	for userID, delta := range deltas {
+		bal, _, code := d.creditSettlementWalletAtomic(userID, delta, req.SettlementId)
+		if code != services.ErrorCode_OK {
+			resp.Code = code
+			return resp, nil
+		}
+		newCurrencys[userID] = bal
+	}
+
 	results := make([]*financeSettlementResult, 0, len(itemRuntimes))
+	applyPool := !settlementClaim.PoolApplied
 	for _, item := range itemRuntimes {
 		currentCurrency, ok := newCurrencys[item.userID]
 		if !ok {
@@ -1775,15 +2164,16 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		}
 		betCNY := item.betAmount.Mul(item.exchange).Truncate(4)
 		payoutCNY := item.payout.Mul(item.exchange).Truncate(4)
-		if mode == financeModeVoidRefund {
-			revenueCNY := betCNY.Mul(runtime.Revenue).Truncate(4)
-			dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.userID, runtime.PoolSymbol, item.currencyType, req.RoundId, betCNY.Neg(), decimal.Zero, revenueCNY.Neg())
-		} else if isDrawRoundItem {
-			// 流局：只记注单（SaveRecord + 局数统计），不改奖池资金口径。
-			dao.CacheIns().RecordSettlement(int64(req.Agent), item.userID, runtime.PoolSymbol, decimal.Zero, decimal.Zero)
-		} else {
-			dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.userID, runtime.PoolSymbol, item.currencyType, req.RoundId, decimal.Zero, payoutCNY, decimal.Zero)
-			dao.CacheIns().RecordSettlement(int64(req.Agent), item.userID, runtime.PoolSymbol, betCNY, payoutCNY)
+		if applyPool {
+			if mode == financeModeVoidRefund {
+				revenueCNY := betCNY.Mul(runtime.Revenue).Truncate(4)
+				dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.userID, runtime.PoolSymbol, item.currencyType, req.RoundId, betCNY.Neg(), decimal.Zero, revenueCNY.Neg())
+			} else if isDrawRoundItem {
+				dao.CacheIns().RecordSettlement(int64(req.Agent), item.userID, runtime.PoolSymbol, decimal.Zero, decimal.Zero)
+			} else {
+				dao.CacheIns().ApplyPoolChange(int64(req.Agent), item.userID, runtime.PoolSymbol, item.currencyType, req.RoundId, decimal.Zero, payoutCNY, decimal.Zero)
+				dao.CacheIns().RecordSettlement(int64(req.Agent), item.userID, runtime.PoolSymbol, betCNY, payoutCNY)
+			}
 		}
 		result := &financeSettlementResult{
 			UserID:   item.userID,
@@ -1793,17 +2183,47 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 		results = append(results, result)
 		resp.Items = append(resp.Items, d.buildSettlementResponse(result))
 	}
+	if applyPool {
+		settlementClaim.PoolApplied = true
+	}
 
-	if round.Reservation != nil && round.Reservation.Status == string(financeStateReserved) {
+	if round.Reservation != nil &&
+		round.Reservation.Status == string(financeStateReserved) &&
+		!settlementClaim.ReleaseDone {
 		reserved, parseErr := decimal.NewFromString(round.Reservation.TotalPayoutCNY)
-		if parseErr != nil || !dao.CacheIns().ReleasePoolReservation(int64(round.Agent), round.PoolSymbol, reserved) {
+		if parseErr != nil {
 			resp.Code = services.ErrorCode_SYSTEM_ERROR
 			return resp, nil
+		}
+		releaseID := fmt.Sprintf("settle:%s", req.SettlementId)
+		if d.testSkipPoolSideEffects {
+			settlementClaim.ReleaseDone = true
+			round.Reservation.ReleaseID = releaseID
+			round.Reservation.ReleaseReason = reservationReleaseReasonSettle
+		} else {
+			released := dao.CacheIns().ReleasePoolReservationWithLedger(
+				int64(round.Agent),
+				round.PoolSymbol,
+				reserved,
+				round.Reservation.ReservationID,
+				round.RoundID,
+				releaseID,
+				reservationReleaseReasonSettle,
+				true,
+			)
+			if !released.Ok {
+				resp.Code = services.ErrorCode_SYSTEM_ERROR
+				return resp, nil
+			}
+			settlementClaim.ReleaseDone = true
+			round.Reservation.ReleaseID = releaseID
+			round.Reservation.ReleaseReason = reservationReleaseReasonSettle
 		}
 	}
 
 	if mode == financeModeVoidRefund {
-		if round.Reservation != nil && round.Reservation.Status == string(financeStateReserved) {
+		if round.Reservation != nil &&
+			(round.Reservation.Status == string(financeStateReserved) || settlementClaim.ReleaseDone) {
 			round.Reservation.Status = string(financeStateVoided)
 		}
 		round.State = string(financeStateVoided)
@@ -1818,22 +2238,25 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 			}
 		}
 	}
-	round.Settlement = &financeSettlement{
-		SettlementID: req.SettlementId,
-		Reservation:  req.ReservationId,
-		BetDigest:    digest,
-		OutcomeHash:  req.OutcomeHash,
-		Mode:         mode,
-		Results:      results,
-		CompletedAt:  time.Now().Unix(),
+	settlementClaim.Results = results
+	settlementClaim.Status = financeSettlementStatusCompleted
+	settlementClaim.CompletedAt = time.Now().Unix()
+	round.Settlement = settlementClaim
+	if err := d.saveRoundLocked(round); err != nil {
+		d.enqueueFinanceReconcile(round.RoundID)
+		zap.L().Error("settlement completed but persist failed; enqueued reconcile",
+			zap.String("roundId", round.RoundID),
+			zap.String("settlementId", req.SettlementId),
+			zap.Error(err),
+		)
 	}
-	d.saveRoundLocked(round)
-	d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
+	if d.pcr != nil && !d.testSkipPoolSideEffects {
+		d.pcr.Record(int64(req.Agent), runtime.PoolSymbol, dao.CacheIns().GetPool(int64(req.Agent), runtime.PoolSymbol))
+	}
 
 	resp.State = round.State
 	return resp, nil
 }
-
 // GetRoundFinanceState 按 roundId 返回牌局资金快照，供第三方在 RPC 超时、服务重启
 // 或人工对账时确认 Lottery 已经处理到哪一步。
 //
@@ -1865,6 +2288,11 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 	defer d.roundLock.Unlock()
 
 	round, ok := d.loadRoundLocked(req.RoundId)
+	fromArchive := false
+	if !ok {
+		round, ok = d.loadArchivedRound(req.RoundId)
+		fromArchive = ok
+	}
 	if !ok {
 		// ROUND_NOT_FOUND 时不能仅依据默认 state=BETTING 判断牌局存在。
 		resp.Code = services.ErrorCode_ROUND_NOT_FOUND
@@ -1875,8 +2303,10 @@ func (d *LotteryService) GetRoundFinanceState(_ context.Context, req *services.G
 		resp.TotalReservedCny = "0"
 		return resp, nil
 	}
-	// 查询前主动检查过期预赔，确保返回的状态和预留金额是最新可用结果。
-	d.expireRoundIfNeededLocked(round)
+	// 热数据才推进过期；冷归档只读返回，避免回写热 HASH。
+	if !fromArchive {
+		d.expireRoundIfNeededLocked(round)
+	}
 
 	resp.State = round.State
 	resp.BetDigest = d.roundBetDigest(round)
@@ -1968,6 +2398,62 @@ func (d *LotteryService) fillCancelBetResponse(
 // testCancelWalletMarkers 仅测试：模拟 Redis cancel wallet marker。
 // key=requestId → 已入账。
 var testCancelWalletMarkers sync.Map
+
+// testSettleWalletMarkers 仅测试：模拟 settlement 钱包 marker。
+// key=settlementId:userId → 已入账。
+var testSettleWalletMarkers sync.Map
+
+// creditSettlementWalletAtomic 结算入账幂等：同一 settlementId+userId 只加一次。
+func (d *LotteryService) creditSettlementWalletAtomic(
+	userID uint32,
+	delta int64,
+	settlementID string,
+) (newCurrency int64, alreadyDone bool, code services.ErrorCode) {
+	if delta == 0 {
+		bal, c := d.getPlayerCurrency(userID)
+		return bal, false, c
+	}
+	if d.testCurrencyHook != nil {
+		markerKey := fmt.Sprintf("%s:%d", settlementID, userID)
+		if _, loaded := testSettleWalletMarkers.LoadOrStore(markerKey, delta); loaded {
+			bal, c := d.testCurrencyHook(userID, 0)
+			return bal, true, c
+		}
+		bal, c := d.testCurrencyHook(userID, delta)
+		if c != services.ErrorCode_OK {
+			testSettleWalletMarkers.Delete(markerKey)
+			return bal, false, c
+		}
+		return bal, false, c
+	}
+	if d.rds == nil {
+		return 0, false, services.ErrorCode_SYSTEM_ERROR
+	}
+	res, err := d.rds.CreditPlayerCurrencyWithSettleMarker(userID, delta, settlementID)
+	if err != nil {
+		if errors.Is(err, dao.ErrPlayerNotCached) {
+			if loadCode := d.loadPlayerToCache(userID); loadCode != services.ErrorCode_OK {
+				return 0, false, loadCode
+			}
+			res, err = d.rds.CreditPlayerCurrencyWithSettleMarker(userID, delta, settlementID)
+		}
+	}
+	if err != nil {
+		if errors.Is(err, dao.ErrInsufficientFunds) {
+			return res.NewCurrency, false, services.ErrorCode_NO_ENOUGH_MONEY
+		}
+		if errors.Is(err, dao.ErrPlayerNotCached) {
+			return 0, false, services.ErrorCode_SYSTEM_ERROR
+		}
+		zap.L().Error("settlement wallet atomic credit failed",
+			zap.Uint32("userId", userID),
+			zap.String("settlementId", settlementID),
+			zap.Error(err),
+		)
+		return 0, false, services.ErrorCode_SYSTEM_ERROR
+	}
+	return res.NewCurrency, res.AlreadyDone, services.ErrorCode_OK
+}
 
 // refundCancelWalletAtomic 原子退款：先入账再写 marker。marker 只代表已实际入账。
 func (d *LotteryService) refundCancelWalletAtomic(

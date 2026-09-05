@@ -11,6 +11,9 @@ service LotteryService {
     rpc Bet(BetRequest) returns (BetResponse);
     // 根据冻结后的下注摘要和候选结果，申请奖池赔付预留。
     rpc PrePay(PrePayRequest) returns (PrePayResponse);
+    // 延长已成功的赔付预留有效期；只改 expiresAt，不改金额/结果/奖池占用。
+    // 禁止用 PrePay 做续期。仅 RESERVED 可续；超时由资金侧自动 EXPIRED 并回退水池。
+    rpc RenewReservation(RenewReservationRequest) returns (RenewReservationResponse);
     // 批量结算本局全部真人玩家，或按 VOID_REFUND 原路退回全部下注。
     rpc Settlement(SettlementRequest) returns (SettlementResponse);
     // 查询本局资金状态，用于 RPC 超时确认和人工审核。
@@ -123,6 +126,37 @@ message PrePayResponse {
     string betDigest = 9;
     string outcomeHash = 10;
     string reservationMode = 11;
+}
+
+// 延长预留有效期：只续命，不改金额/结果。
+message RenewReservationRequest {
+    string requestId = 1;
+    string roundId = 2;
+    uint32 gameId = 3;
+    uint32 agent = 4;
+    uint32 level = 5;
+    // 必须与当前生效的 reservationId 一致。
+    string reservationId = 6;
+    // 可选一致性校验：非空时必须与当前预留一致。
+    string betDigest = 7;
+    string outcomeHash = 8;
+    // 从 now 起再保留的秒数；0 使用默认 60 秒。
+    // 新 expiresAt = max(旧 expiresAt, now + extendSeconds)。
+    uint32 extendSeconds = 9;
+}
+
+message RenewReservationResponse {
+    base.error_code code = 1;
+    bool success = 2;
+    string roundId = 3;
+    string state = 4;
+    string reservationId = 5;
+    int64 expiresAt = 6;
+    // INVALID_REQUEST / NOT_RESERVED / EXPIRED / ROUND_CONFLICT / BET_MISMATCH
+    string reason = 7;
+    string betDigest = 8;
+    string outcomeHash = 9;
+    string reservationMode = 10;
 }
 
 // 单个真人玩家的结算数据。
