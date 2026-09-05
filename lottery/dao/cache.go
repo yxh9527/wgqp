@@ -379,29 +379,63 @@ func (gcm *GameCacheMgr) ReleasePoolReservationWithLedger(
 	reservationID, roundID, releaseID, reason string,
 	allowMigrate bool,
 ) ReleaseWithLedgerResult {
+	qBefore := RedisIns().GetAgentReserved(agentID, symbol)
 	result, err := RedisIns().ReleaseAgentReservedWithLedger(
 		agentID, symbol, amount, reservationID, roundID, releaseID, reason, allowMigrate,
 	)
 	if err != nil {
-		zap.L().Error("带 ledger 释放奖池预留失败",
+		zap.L().Error("预扣回退水池失败",
 			zap.Int64("agentId", agentID),
-			zap.String("symbol", symbol),
-			zap.String("amount", amount.String()),
+			zap.String("poolSymbol", symbol),
+			zap.String("amountCny", amount.String()),
 			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
 			zap.String("releaseId", releaseID),
+			zap.String("reason", reason),
+			zap.String("qBefore", qBefore.String()),
 			zap.Error(err),
 		)
 		return ReleaseWithLedgerResult{}
 	}
 	if !result.Ok {
-		zap.L().Error("带 ledger 释放奖池预留被拒绝",
+		zap.L().Error("预扣回退水池被拒绝",
 			zap.Int64("agentId", agentID),
-			zap.String("symbol", symbol),
-			zap.String("amount", amount.String()),
+			zap.String("poolSymbol", symbol),
+			zap.String("amountCny", amount.String()),
 			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
 			zap.String("releaseId", releaseID),
+			zap.String("reason", reason),
+			zap.String("qBefore", qBefore.String()),
 		)
+		return result
 	}
+	qAfter := RedisIns().GetAgentReserved(agentID, symbol)
+	if result.AlreadyReleased {
+		zap.L().Info("预扣回退水池幂等跳过(ledger已RELEASED)",
+			zap.Int64("agentId", agentID),
+			zap.String("poolSymbol", symbol),
+			zap.String("amountCny", amount.String()),
+			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
+			zap.String("releaseId", releaseID),
+			zap.String("reason", reason),
+			zap.String("qBefore", qBefore.String()),
+			zap.String("qAfter", qAfter.String()),
+		)
+		return result
+	}
+	zap.L().Info("预扣回退水池成功",
+		zap.Int64("agentId", agentID),
+		zap.String("poolSymbol", symbol),
+		zap.String("amountCny", amount.String()),
+		zap.String("reservationId", reservationID),
+		zap.String("roundId", roundID),
+		zap.String("releaseId", releaseID),
+		zap.String("reason", reason),
+		zap.String("qBefore", qBefore.String()),
+		zap.String("qAfter", qAfter.String()),
+	)
 	return result
 }
 
@@ -417,24 +451,91 @@ func (gcm *GameCacheMgr) AdjustPoolReservationWithLedger(
 	defer agent.lock.Unlock()
 
 	basePool := poolValue(agent.GetGame(symbol))
+	qBefore := RedisIns().GetAgentReserved(agentID, symbol)
 	ok, err := RedisIns().AdjustAgentReservedWithLedger(
 		agentID, symbol, basePool, oldAmount, newAmount, reservationID, roundID,
 	)
 	if err != nil {
+		zap.L().Error("预扣额度调整失败",
+			zap.Int64("agentId", agentID),
+			zap.String("poolSymbol", symbol),
+			zap.String("oldAmountCny", oldAmount.String()),
+			zap.String("newAmountCny", newAmount.String()),
+			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
+			zap.String("qBefore", qBefore.String()),
+			zap.Error(err),
+		)
 		return false, err
 	}
-	if ok {
-		return true, nil
+	if !ok {
+		// ledger 缺失：补建 ACTIVE（不改 Q，旧预留已在汇总里），再调一次。
+		if seedErr := RedisIns().SeedReservationLedgerActive(
+			agentID, symbol, oldAmount, reservationID, roundID,
+		); seedErr != nil {
+			zap.L().Error("预扣 ledger 补建失败",
+				zap.Int64("agentId", agentID),
+				zap.String("poolSymbol", symbol),
+				zap.String("reservationId", reservationID),
+				zap.String("roundId", roundID),
+				zap.Error(seedErr),
+			)
+			return false, seedErr
+		}
+		zap.L().Info("预扣 ledger 缺失已补建ACTIVE",
+			zap.Int64("agentId", agentID),
+			zap.String("poolSymbol", symbol),
+			zap.String("amountCny", oldAmount.String()),
+			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
+		)
+		ok, err = RedisIns().AdjustAgentReservedWithLedger(
+			agentID, symbol, basePool, oldAmount, newAmount, reservationID, roundID,
+		)
+		if err != nil {
+			return false, err
+		}
 	}
-	// ledger 缺失：补建 ACTIVE（不改 Q，旧预留已在汇总里），再调一次。
-	if seedErr := RedisIns().SeedReservationLedgerActive(
-		agentID, symbol, oldAmount, reservationID, roundID,
-	); seedErr != nil {
-		return false, seedErr
+	if !ok {
+		zap.L().Error("预扣额度调整被拒绝",
+			zap.Int64("agentId", agentID),
+			zap.String("poolSymbol", symbol),
+			zap.String("oldAmountCny", oldAmount.String()),
+			zap.String("newAmountCny", newAmount.String()),
+			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
+			zap.String("qBefore", qBefore.String()),
+		)
+		return false, nil
 	}
-	return RedisIns().AdjustAgentReservedWithLedger(
-		agentID, symbol, basePool, oldAmount, newAmount, reservationID, roundID,
-	)
+	qAfter := RedisIns().GetAgentReserved(agentID, symbol)
+	delta := newAmount.Sub(oldAmount)
+	if delta.IsNegative() {
+		zap.L().Info("预扣差额回退水池成功",
+			zap.Int64("agentId", agentID),
+			zap.String("poolSymbol", symbol),
+			zap.String("oldAmountCny", oldAmount.String()),
+			zap.String("newAmountCny", newAmount.String()),
+			zap.String("releasedCny", delta.Abs().String()),
+			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
+			zap.String("qBefore", qBefore.String()),
+			zap.String("qAfter", qAfter.String()),
+		)
+	} else if delta.IsPositive() {
+		zap.L().Info("预扣额度上调成功",
+			zap.Int64("agentId", agentID),
+			zap.String("poolSymbol", symbol),
+			zap.String("oldAmountCny", oldAmount.String()),
+			zap.String("newAmountCny", newAmount.String()),
+			zap.String("addedCny", delta.String()),
+			zap.String("reservationId", reservationID),
+			zap.String("roundId", roundID),
+			zap.String("qBefore", qBefore.String()),
+			zap.String("qAfter", qAfter.String()),
+		)
+	}
+	return true, nil
 }
 
 // RecordSettlement 更新打码量、玩家局数和玩家累计返奖，不重复修改代理奖池。

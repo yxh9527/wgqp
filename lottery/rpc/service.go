@@ -929,6 +929,16 @@ func (d *LotteryService) expireRoundIfNeededLocked(round *financeRound) bool {
 		return true
 	}
 	releaseID := fmt.Sprintf("expire:%s:%s", round.RoundID, round.Reservation.ReservationID)
+	zap.L().Info("预扣超时开始回退水池",
+		zap.Uint32("agent", round.Agent),
+		zap.Uint32("gameId", round.GameID),
+		zap.String("poolSymbol", round.PoolSymbol),
+		zap.String("roundId", round.RoundID),
+		zap.String("reservationId", round.Reservation.ReservationID),
+		zap.String("amountCny", amount.String()),
+		zap.Int64("expiresAt", round.Reservation.ExpiresAt),
+		zap.String("releaseId", releaseID),
+	)
 	released := dao.CacheIns().ReleasePoolReservationWithLedger(
 		int64(round.Agent),
 		round.PoolSymbol,
@@ -940,6 +950,12 @@ func (d *LotteryService) expireRoundIfNeededLocked(round *financeRound) bool {
 		true,
 	)
 	if !released.Ok {
+		zap.L().Error("预扣超时回退水池失败",
+			zap.String("roundId", round.RoundID),
+			zap.String("reservationId", round.Reservation.ReservationID),
+			zap.String("releaseId", releaseID),
+			zap.String("amountCny", amount.String()),
+		)
 		return false
 	}
 	round.Reservation.Status = string(financeStateExpired)
@@ -954,6 +970,14 @@ func (d *LotteryService) expireRoundIfNeededLocked(round *financeRound) bool {
 			zap.String("roundId", round.RoundID),
 			zap.String("reservationId", round.Reservation.ReservationID),
 			zap.Error(err),
+		)
+	} else {
+		zap.L().Info("预扣超时已回退水池并清理RESERVED状态",
+			zap.String("roundId", round.RoundID),
+			zap.String("reservationId", round.Reservation.ReservationID),
+			zap.String("amountCny", amount.String()),
+			zap.Bool("alreadyReleased", released.AlreadyReleased),
+			zap.String("state", round.State),
 		)
 	}
 	return true
@@ -1052,17 +1076,39 @@ func (d *LotteryService) archiveRoundLocked(round *financeRound, raw string) err
 		}
 		raw = encoded
 	}
+	reservationID := ""
+	reservedCny := ""
+	if round.Reservation != nil {
+		reservationID = round.Reservation.ReservationID
+		reservedCny = round.Reservation.TotalPayoutCNY
+	}
 	if d.rds != nil {
 		if err := d.rds.HSet(financeRoundArchiveHash, raw, round.RoundID); err != nil {
+			zap.L().Error("清理预扣快照:写入冷归档失败",
+				zap.String("roundId", round.RoundID),
+				zap.String("state", round.State),
+				zap.String("reservationId", reservationID),
+				zap.Error(err),
+			)
 			return err
 		}
 		if err := d.rds.HDel(financeRoundHash, round.RoundID); err != nil {
-			zap.L().Error("archive: delete live finance round failed",
+			zap.L().Error("清理预扣快照:删除热数据失败",
 				zap.String("roundId", round.RoundID), zap.Error(err))
 			return err
 		}
 	}
 	delete(d.rounds, round.RoundID)
+	zap.L().Info("清理预扣快照:终态局已冷归档",
+		zap.Uint32("agent", round.Agent),
+		zap.Uint32("gameId", round.GameID),
+		zap.String("poolSymbol", round.PoolSymbol),
+		zap.String("roundId", round.RoundID),
+		zap.String("state", round.State),
+		zap.String("reservationId", reservationID),
+		zap.String("totalPayoutCny", reservedCny),
+		zap.Int64("terminalAt", roundTerminalAt(round)),
+	)
 	return nil
 }
 
@@ -2201,6 +2247,17 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 			round.Reservation.ReleaseID = releaseID
 			round.Reservation.ReleaseReason = reservationReleaseReasonSettle
 		} else {
+			zap.L().Info("结算开始回退预扣到水池",
+				zap.Uint32("agent", round.Agent),
+				zap.Uint32("gameId", round.GameID),
+				zap.String("poolSymbol", round.PoolSymbol),
+				zap.String("roundId", round.RoundID),
+				zap.String("settlementId", req.SettlementId),
+				zap.String("reservationId", round.Reservation.ReservationID),
+				zap.String("amountCny", reserved.String()),
+				zap.String("mode", mode),
+				zap.String("releaseId", releaseID),
+			)
 			released := dao.CacheIns().ReleasePoolReservationWithLedger(
 				int64(round.Agent),
 				round.PoolSymbol,
@@ -2212,12 +2269,25 @@ func (d *LotteryService) Settlement(_ context.Context, req *services.SettlementR
 				true,
 			)
 			if !released.Ok {
+				zap.L().Error("结算回退预扣失败",
+					zap.String("roundId", round.RoundID),
+					zap.String("settlementId", req.SettlementId),
+					zap.String("reservationId", round.Reservation.ReservationID),
+					zap.String("amountCny", reserved.String()),
+				)
 				resp.Code = services.ErrorCode_SYSTEM_ERROR
 				return resp, nil
 			}
 			settlementClaim.ReleaseDone = true
 			round.Reservation.ReleaseID = releaseID
 			round.Reservation.ReleaseReason = reservationReleaseReasonSettle
+			zap.L().Info("结算预扣已回退水池",
+				zap.String("roundId", round.RoundID),
+				zap.String("settlementId", req.SettlementId),
+				zap.String("reservationId", round.Reservation.ReservationID),
+				zap.String("amountCny", reserved.String()),
+				zap.Bool("alreadyReleased", released.AlreadyReleased),
+			)
 		}
 	}
 
